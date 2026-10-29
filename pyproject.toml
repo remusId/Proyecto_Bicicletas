@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proyecto-final-poo"
+version = "0.1.0"
+description = "Rutas ciclistas con A* propio sobre datos de OpenStreetMap"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "osmnx>=2.0.0",
+    "networkx>=3.2",
+    "requests>=2.31",
+    "folium>=0.16",
+    "streamlit>=1.38",
+    "streamlit-folium>=0.22",
+    "scipy>=1.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+basemap = [
+    "contextily>=1.5",
+]
+
+[project.scripts]
+proyecto-poo = "app.ui.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-m 'not network'"
+markers = [
+    "network: prueba de integración que requiere acceso a Internet",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
