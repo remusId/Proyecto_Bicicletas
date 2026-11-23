@@ -171,6 +171,8 @@ class RouteResult:
     graph: Any = None
     origin_node: NodeId | None = None
     dest_node: NodeId | None = None
+    alternative_origin: Coordinate | None = None
+    alternative_dest: Coordinate | None = None
 
     def __post_init__(self) -> None:
         if self.distance_m < 0.0 or self.duration_s < 0.0:

@@ -7,9 +7,10 @@ from typing import Any
 
 import networkx as nx
 import osmnx as ox
+from osmnx import _errors
 from pyproj import Transformer
 
-from app.domain.exceptions import ProviderUnavailableError, SnapDistanceError
+from app.domain.exceptions import EmptyGraphError, ProviderUnavailableError, SnapDistanceError
 from app.domain.models import BoundingBox, Coordinate, NodeId
 from app.providers.base import GraphProvider
 from app.routing.geo import node_coordinate
@@ -76,13 +77,17 @@ class OsmnxProvider(GraphProvider):
         try:
             graph = self._download_graph(bbox)
             if graph.number_of_nodes() == 0 or graph.number_of_edges() == 0:
-                raise ProviderUnavailableError(
+                raise EmptyGraphError(
                     "OSMnx no encontró una red ciclable en el área seleccionada. "
                     "Prueba a ampliar el margen o mover los puntos."
                 )
             graph = self._project_and_keep_latlon(graph)
         except ProviderUnavailableError:
             raise
+        except _errors.InsufficientResponseError as exc:
+            raise EmptyGraphError(
+                "OSMnx no encontró una red ciclable en el área seleccionada."
+            ) from exc
         except Exception as exc:  # OSMnx puede lanzar errores de red o de datos.
             raise ProviderUnavailableError(
                 "No se pudo descargar la red ciclable con OSMnx. "

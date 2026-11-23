@@ -20,6 +20,58 @@ perfiles de coste, dos algoritmos, interfaz Streamlit/Folium y CLI.
 - Visualización Folium con ruta, origen, destino, métricas y atribución
   «© OpenStreetMap contributors».
 
+## Abrir sin terminal
+
+En Windows, haz doble clic en `lanzar_silencioso.vbs` o en `iniciar_app.bat`.
+El lanzador prepara el entorno si hace falta y abre el navegador cuando Streamlit
+responde. Usa el puerto 8501 si está libre y elige otro si está ocupado.
+La primera instalación necesita Python 3.11 o superior, el lanzador `py` y conexión a Internet.
+
+El mapa recuerda centro y zoom al recargar. Guarda la vista en
+`%LOCALAPPDATA%\RutasCiclistas\ui_state.json` o en
+`~/.config/rutas-ciclistas/ui_state.json` cuando no hay `LOCALAPPDATA`.
+Define `APP_UI_STATE` para indicar otra ubicación.
+
+## Buscar lugares
+
+En la web, escribe un nombre y pulsa **Buscar**. Selecciona un resultado y
+pulsa **Usar como origen** o **Usar como destino**. Para introducir coordenadas,
+selecciona **Origen** o **Destino**, escribe `LAT,LON` y pulsa **Fijar origen** o
+**Fijar destino**. El mapa se centra en el punto que acabas de guardar.
+
+```powershell
+python -m app --geocode "Plaza Norte, Lima"
+python -m app --origin-place "Plaza Norte, Lima" --dest-place "UNI, Lima" --no-plot
+```
+
+La CLI usa el primer resultado para cada punto. Si hay varias coincidencias,
+indica cuál eligió. Para seleccionar otra, consulta `--geocode` y copia sus
+coordenadas a `--origin` o `--dest`.
+
+La búsqueda usa Nominatim bajo demanda. La CLI y la web comparten una caché
+local de siete días y envían como máximo una petición por segundo por instalación.
+Configura un `OSM_USER_AGENT` identificable y evita enviar datos personales o
+confidenciales. Si cambias de servicio, define `APP_NOMINATIM_URL`.
+Consulta la [política de uso de Nominatim](https://operations.osmfoundation.org/policies/nominatim/).
+
+## Si Overpass no responde
+
+Overpass prueba los servidores en orden y comparte entre ellos un presupuesto
+de 90 segundos (`APP_OVERPASS_DEADLINE_S`). Usa `APP_OVERPASS_URLS` para pasar
+una lista separada por comas. Si solo defines `OVERPASS_URL`, se usa ese servidor.
+Puedes reintentar en unos minutos o elegir OSMnx en la barra lateral o con
+`--provider osmnx`. OSMnx también depende de la disponibilidad de su propio endpoint.
+
+## Si no hay ruta
+
+Abre **Diagnóstico** en la web o consulta el bloque del mismo nombre en la CLI.
+Si los puntos quedaron en componentes distintas, se indican sus tamaños, la
+distancia mínima y las coordenadas de los dos nodos más próximos. Un hueco entre
+nodos indica dónde termina la conectividad registrada. La app prueba primero
+alternativas de un solo extremo, en orden de menor desplazamiento, y después
+prueba pares alternativos conectados. Si logra calcular una ruta, muestra qué
+puntos sustituyó y su distancia en línea recta a los puntos solicitados.
+
 ## Requisitos
 
 - Python 3.11 o superior.
@@ -65,9 +117,9 @@ streamlit run src/app/ui/streamlit_app.py
 4. La app muestra distancia, tiempo estimado, nodos expandidos, backend,
    distancias de snap, avisos y el mapa con la ruta.
 
-El centro inicial es Madrid; puedes desplazar y hacer zoom en el mapa para
-trabajar en otra zona. El área se calcula con los dos puntos más el margen
-configurado y se rechaza si supera el límite (25 km² por defecto).
+La primera sesión abre en Madrid. Puedes desplazar el mapa y ajustar el zoom.
+El área se ajusta automáticamente a los dos puntos y al margen configurado.
+La barra indica cuándo se está preparando la red y cuándo se calcula la ruta.
 
 ## Uso: CLI
 
@@ -170,8 +222,9 @@ pytest -m network -q
   `LAT,LON`.
 - No hay instrucciones giro a giro, elevación, tráfico en vivo ni perfil de
   altimetría.
-- El límite de 25 km² es deliberadamente conservador para no castigar la API
-  pública de Overpass.
+- Las áreas grandes pueden tardar más o exceder el tiempo de espera del proveedor.
+  La CLI muestra el progreso en la salida de errores y admite un límite manual
+  con `--max-area-km2` o `APP_MAX_AREA_KM2`.
 - La disponibilidad depende de OSMnx, Overpass y de la conexión a Internet.
 - Si el snap supera 200 m se avisa; solo se rechaza si se configura
   `APP_MAX_SNAP_M`. El snap ignora los nodos sin ninguna arista transitable por
@@ -209,5 +262,3 @@ tests/
 └─ ...
 docs/diagrama_clases.md
 ```
-#   P r o y e c t o _ B i c i c l e t a s  
- 

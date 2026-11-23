@@ -31,11 +31,5 @@ class GraphProviderFactory:
                 retries=settings.overpass_retries,
             )
         if normalized == "overpass":
-            return OverpassProvider(
-                cache,
-                overpass_url=settings.overpass_url,
-                timeout_s=settings.overpass_timeout_s,
-                retries=settings.overpass_retries,
-                user_agent=settings.user_agent,
-            )
+            return OverpassProvider.from_settings(cache, settings)
         raise ValueError("Proveedor no soportado. Usa 'osmnx' o 'overpass'.")

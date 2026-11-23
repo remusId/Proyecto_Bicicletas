@@ -9,8 +9,8 @@ import networkx as nx
 from app.config import Settings
 from app.domain.exceptions import (
     AreaTooLargeError,
+    EmptyGraphError,
     NoRouteFoundError,
-    ProviderUnavailableError,
     SnapDistanceError,
 )
 from app.domain.models import BoundingBox, Coordinate, NodeId, RouteResult
@@ -18,6 +18,7 @@ from app.providers.base import GraphProvider
 from app.routing.base import PathFinder
 from app.routing.geo import node_coordinate
 from app.routing.profile import CostProfile
+from app.services.diagnostics import explain_no_route, retry_pairs
 
 
 class RoutePlanner:
@@ -34,6 +35,7 @@ class RoutePlanner:
         self._profile = profile
         self._pathfinder = pathfinder
         self._settings = settings
+        self._prepared: tuple[BoundingBox, nx.MultiDiGraph] | None = None
 
     @property
     def provider(self) -> GraphProvider:
@@ -55,8 +57,7 @@ class RoutePlanner:
         """Configuración inyectada."""
         return self._settings
 
-    def plan(self, origin: Coordinate, dest: Coordinate) -> RouteResult:
-        """Calcula la ruta entre dos coordenadas."""
+    def _bbox(self, origin: Coordinate, dest: Coordinate) -> BoundingBox:
         bbox = BoundingBox.from_points(origin, dest, margin_m=self._settings.margin_m)
         if bbox.area_km2 > self._settings.max_area_km2:
             raise AreaTooLargeError(
@@ -64,22 +65,91 @@ class RoutePlanner:
                 f"configurado ({self._settings.max_area_km2:.2f} km²). "
                 "Acerca los puntos o reduce el margen."
             )
+        return bbox
 
-        graph = self._provider.load_graph(bbox, profile=self._profile.name)
+    def prefetch(self, origin: Coordinate, dest: Coordinate) -> None:
+        """Carga la red para la siguiente llamada a plan con el mismo recorte."""
+        bbox = self._bbox(origin, dest)
+        self._prepared = bbox, self._provider.load_graph(bbox, profile=self._profile.name)
+
+    def plan(self, origin: Coordinate, dest: Coordinate) -> RouteResult:
+        """Calcula la ruta entre dos coordenadas."""
+        return self._plan(origin, dest, retry=False)
+
+    def plan_with_alternatives(self, origin: Coordinate, dest: Coordinate) -> RouteResult:
+        """Intenta la ruta pedida y reintenta con extremos conectados si falla."""
+        return self._plan(origin, dest, retry=True)
+
+    def _plan(self, origin: Coordinate, dest: Coordinate, *, retry: bool) -> RouteResult:
+        bbox = self._bbox(origin, dest)
+        prepared = self._prepared
+        if prepared is not None and prepared[0] == bbox:
+            graph = prepared[1]
+        else:
+            graph = self._provider.load_graph(bbox, profile=self._profile.name)
+
         if graph.number_of_nodes() == 0:
-            raise ProviderUnavailableError(
+            raise EmptyGraphError(
                 "La red descargada está vacía. No hay cobertura ciclable en el área."
             )
 
         origin_node, origin_snap = self._snap(graph, origin, arriving=False)
         dest_node, dest_snap = self._snap(graph, dest, arriving=True)
-        warnings = self._snap_warnings(origin_snap, dest_snap)
         self._check_max_snap(origin_snap, dest_snap)
 
-        search = self._pathfinder.bind(graph, self._profile).find_path(origin_node, dest_node)
+        finder = self._pathfinder.bind(graph, self._profile)
+        alternative_origin = alternative_dest = None
+        try:
+            search = finder.find_path(origin_node, dest_node)
+        except NoRouteFoundError as exc:
+            pairs = retry_pairs(graph, self._profile, origin_node, dest_node, origin, dest)
+            for start, end in pairs if retry else ():
+                start_point = node_coordinate(graph, start) if start != origin_node else None
+                end_point = node_coordinate(graph, end) if end != dest_node else None
+                start_snap = origin_snap if start_point is None else origin.distance_to(start_point)
+                end_snap = dest_snap if end_point is None else dest.distance_to(end_point)
+                try:
+                    self._check_max_snap(start_snap, end_snap)
+                    search = finder.find_path(start, end)
+                except (NoRouteFoundError, SnapDistanceError):
+                    continue
+                if not math.isfinite(search.cost) or not math.isfinite(search.distance_m):
+                    continue
+                alternative_origin, alternative_dest = start_point, end_point
+                origin_node, dest_node = start, end
+                origin_snap, dest_snap = start_snap, end_snap
+                break
+            else:
+                exc.diagnostic = explain_no_route(
+                    graph,
+                    self._profile,
+                    origin_node,
+                    dest_node,
+                    requested_points=(origin, dest) if not retry else None,
+                )
+                if retry:
+                    exc.diagnostic = (
+                        f"{exc.diagnostic or ''}\n"
+                        "No se encontró una alternativa que cumpla la configuración actual."
+                    ).strip()
+                raise
         if not math.isfinite(search.cost) or not math.isfinite(search.distance_m):
             raise NoRouteFoundError("La ruta calculada no tiene una distancia válida.")
 
+        warnings = self._snap_warnings(
+            origin_snap if alternative_origin is None else 0.0,
+            dest_snap if alternative_dest is None else 0.0,
+        )
+        for label, point, distance in (
+            ("Origen", alternative_origin, origin_snap),
+            ("Destino", alternative_dest, dest_snap),
+        ):
+            if point is not None:
+                warnings.append(
+                    f"{label} alternativo aplicado: {point.lat},{point.lon} "
+                    f"({distance:.0f} m en línea recta del punto pedido). "
+                    "El tramo hasta el punto pedido queda fuera de la ruta."
+                )
         speed_m_s = self._settings.bike_speed_kmh * 1000.0 / 3600.0
         duration_s = search.distance_m / speed_m_s
         geometry = tuple(node_coordinate(graph, node) for node in search.nodes)
@@ -101,6 +171,8 @@ class RoutePlanner:
             graph=graph,
             origin_node=origin_node,
             dest_node=dest_node,
+            alternative_origin=alternative_origin,
+            alternative_dest=alternative_dest,
         )
 
     def _snap(

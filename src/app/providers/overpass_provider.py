@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import math
+import random
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import networkx as nx
 import requests
 from scipy.spatial import cKDTree
 from shapely.geometry import LineString
 
-from app.domain.exceptions import ProviderUnavailableError, SnapDistanceError
+from app.config import Settings
+from app.domain.exceptions import EmptyGraphError, ProviderUnavailableError, SnapDistanceError
 from app.domain.models import (
     EARTH_RADIUS_M,
     BoundingBox,
@@ -31,7 +35,6 @@ _RELEVANT_HIGHWAYS = (
     "steps|cycleway|bridleway|road|construction|proposed|raceway|"
     "bus_guideway|corridor|elevator|escalator|platform"
 )
-_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 def _tag_text(value: Any) -> str:
@@ -193,7 +196,8 @@ class OverpassProvider(GraphProvider):
             raise ValueError("El User-Agent no puede estar vacío.")
         if backoff_base_s < 0.0:
             raise ValueError("El backoff no puede ser negativo.")
-        self._url = overpass_url
+        self._urls = (overpass_url,)
+        self._deadline_s = 90.0
         self._timeout_s = timeout_s
         self._retries = retries
         self._backoff_base_s = backoff_base_s
@@ -204,6 +208,19 @@ class OverpassProvider(GraphProvider):
                 "Accept": "application/json",
             }
         )
+
+    @classmethod
+    def from_settings(cls, cache: GraphCache, settings: Settings) -> OverpassProvider:
+        provider = cls(
+            cache,
+            overpass_url=settings.overpass_url,
+            timeout_s=settings.overpass_timeout_s,
+            retries=settings.overpass_retries,
+            user_agent=settings.user_agent,
+        )
+        provider._urls = tuple(dict.fromkeys(settings.overpass_urls or (settings.overpass_url,)))
+        provider._deadline_s = settings.overpass_deadline_s
+        return provider
 
     @property
     def name(self) -> str:
@@ -239,7 +256,7 @@ class OverpassProvider(GraphProvider):
             ) from exc
 
         if graph.number_of_nodes() == 0 or graph.number_of_edges() == 0:
-            raise ProviderUnavailableError(
+            raise EmptyGraphError(
                 "Overpass no encontró una red ciclable en el área seleccionada. "
                 "Prueba a ampliar el margen o mover los puntos."
             )
@@ -293,60 +310,89 @@ class OverpassProvider(GraphProvider):
         )
 
     def _request(self, query: str) -> dict[str, Any]:
-        last_error = "sin respuesta"
-        for attempt in range(1, self._retries + 1):
-            try:
-                response = self._session.post(
-                    self._url,
-                    data={"data": query},
-                    timeout=self._timeout_s,
-                )
-            except requests.Timeout:
-                last_error = "timeout"
-                if attempt < self._retries:
-                    time.sleep(self._backoff_base_s * (2 ** (attempt - 1)))
-                continue
-            except requests.RequestException:
-                last_error = "error de conexión"
-                if attempt < self._retries:
-                    time.sleep(self._backoff_base_s * (2 ** (attempt - 1)))
-                continue
-
-            if response.status_code == 200:
+        deadline = time.monotonic() + self._deadline_s
+        tried = []
+        total = 0
+        for index, url in enumerate(self._urls):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            endpoint_deadline = time.monotonic() + remaining / (len(self._urls) - index)
+            attempts = 0
+            retryable = True
+            for attempt in range(1, self._retries + 1):
+                remaining = endpoint_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                attempts += 1
+                retry_after = None
                 try:
-                    payload = response.json()
-                except ValueError as exc:
-                    raise ProviderUnavailableError(
-                        "Overpass devolvió una respuesta que no es JSON válido."
-                    ) from exc
-                if not isinstance(payload, dict):
-                    raise ProviderUnavailableError(
-                        "Overpass devolvió una respuesta con formato inesperado."
+                    response = self._session.post(
+                        url, data={"data": query}, timeout=min(self._timeout_s, remaining)
                     )
-                return payload
-
-            last_error = f"HTTP {response.status_code}"
-            if response.status_code not in _RETRYABLE_STATUS:
-                raise ProviderUnavailableError(
-                    f"Overpass respondió con {last_error}. Revisa los parámetros de la consulta."
-                )
-            if attempt < self._retries:
-                retry_after = response.headers.get("Retry-After")
-                delay = self._retry_delay(attempt, retry_after)
-                time.sleep(delay)
-
+                except requests.Timeout:
+                    last_error = "timeout"
+                except requests.RequestException:
+                    last_error = "error de conexión"
+                else:
+                    status = response.status_code
+                    if status == 200:
+                        return self._decode(response)
+                    last_error = f"HTTP {status}"
+                    if status != 429 and not 500 <= status < 600:
+                        retryable = False
+                        break
+                    retry_after = response.headers.get("Retry-After")
+                    if status == 429 and retry_after is None:
+                        retry_after = "30"
+                if attempt < self._retries:
+                    delay = self._retry_delay(attempt, retry_after)
+                    if delay >= endpoint_deadline - time.monotonic():
+                        break
+                    time.sleep(delay)
+            if attempts:
+                total += attempts
+                try:
+                    host = urlsplit(url).hostname or "servidor sin nombre"
+                except ValueError:
+                    host = "URL inválida"
+                tried.append(f"{host} ({attempts}, {last_error})")
+            if not retryable:
+                break
         raise ProviderUnavailableError(
-            f"Overpass no está disponible tras {self._retries} intentos ({last_error}). "
-            "Espera un poco y vuelve a intentarlo."
+            f"Overpass no está disponible tras {total} intentos. "
+            f"Servidores probados: {', '.join(tried) or 'ninguno'}. "
+            "Reintenta en unos minutos, elige OSMnx (--provider osmnx) "
+            "o define OVERPASS_URL para usar otro servidor."
         )
+
+    @staticmethod
+    def _decode(response: requests.Response) -> dict[str, Any]:
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProviderUnavailableError(
+                "Overpass devolvió una respuesta que no es JSON válido."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ProviderUnavailableError(
+                "Overpass devolvió una respuesta con formato inesperado."
+            )
+        return payload
 
     def _retry_delay(self, attempt: int, retry_after: str | None) -> float:
         if retry_after:
             try:
                 return max(0.0, float(retry_after))
             except ValueError:
-                pass
-        return self._backoff_base_s * (2 ** (attempt - 1))
+                try:
+                    return max(
+                        0.0,
+                        (parsedate_to_datetime(retry_after) - datetime.now(UTC)).total_seconds(),
+                    )
+                except (TypeError, ValueError):
+                    pass
+        return self._backoff_base_s * (2 ** (attempt - 1)) * random.uniform(0.8, 1.2)
 
 
 __all__ = ["OverpassProvider", "parse_overpass_payload"]

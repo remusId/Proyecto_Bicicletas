@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import math
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from app.domain.models import Coordinate
+from app.domain.models import BoundingBox, Coordinate
 
 DEFAULT_USER_AGENT = (
-    "ProyectoFinalPOO/0.1 (proyecto académico; "
+    "ProyectoFinalPOO/0.1 (proyecto academico; "
     "configura OSM_USER_AGENT con un contacto identificable)"
+)
+OVERPASS_MIRRORS = (
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.nextgis.com/api/interpreter",
 )
 
 
@@ -52,6 +57,8 @@ class Settings:
     network_type: str = "bike"
     default_center: Coordinate = field(default_factory=lambda: Coordinate(lat=40.4168, lon=-3.7038))
     map_zoom: int = 14
+    overpass_urls: tuple[str, ...] = ()
+    overpass_deadline_s: float = 90.0
 
     def __post_init__(self) -> None:
         if self.provider not in {"osmnx", "overpass"}:
@@ -72,6 +79,8 @@ class Settings:
             raise ValueError("La velocidad media debe ser mayor que cero.")
         if self.overpass_timeout_s <= 0.0:
             raise ValueError("El timeout de Overpass debe ser mayor que cero.")
+        if not math.isfinite(self.overpass_deadline_s) or self.overpass_deadline_s <= 0:
+            raise ValueError("El plazo total de Overpass debe ser finito y mayor que cero.")
         if not 1 <= self.overpass_retries <= 3:
             raise ValueError("Overpass admite entre 1 y 3 intentos.")
         if not self.user_agent.strip():
@@ -79,6 +88,13 @@ class Settings:
         if self.map_zoom < 1:
             raise ValueError("El zoom del mapa debe ser positivo.")
         object.__setattr__(self, "cache_dir", Path(self.cache_dir))
+
+    def with_area_for(self, origin: Coordinate, dest: Coordinate) -> Settings:
+        """Amplía el límite base hasta cubrir los puntos y el margen."""
+        area = BoundingBox.from_points(origin, dest, self.margin_m).area_km2
+        if area <= self.max_area_km2:
+            return self
+        return replace(self, max_area_km2=area)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -89,6 +105,11 @@ class Settings:
         algorithm = os.getenv("APP_ALGORITHM", defaults.algorithm)
         max_snap_raw = os.getenv("APP_MAX_SNAP_M")
         max_snap_m = defaults.max_snap_m if max_snap_raw is None else float(max_snap_raw)
+        single_url = os.getenv("OVERPASS_URL")
+        raw_urls = os.getenv("APP_OVERPASS_URLS")
+        urls = tuple(url.strip() for url in raw_urls.split(",") if url.strip()) if raw_urls else ()
+        if not urls:
+            urls = (single_url,) if single_url else (defaults.overpass_url, *OVERPASS_MIRRORS)
         return cls(
             provider=provider,
             profile=profile,
@@ -100,7 +121,9 @@ class Settings:
             bike_speed_kmh=_env_float("APP_BIKE_SPEED_KMH", defaults.bike_speed_kmh),
             cache_dir=Path(os.getenv("APP_CACHE_DIR", str(defaults.cache_dir))),
             use_cache=_env_bool("APP_USE_CACHE", defaults.use_cache),
-            overpass_url=os.getenv("OVERPASS_URL", defaults.overpass_url),
+            overpass_url=urls[0],
+            overpass_urls=urls,
+            overpass_deadline_s=_env_float("APP_OVERPASS_DEADLINE_S", defaults.overpass_deadline_s),
             overpass_timeout_s=_env_float("OVERPASS_TIMEOUT_S", defaults.overpass_timeout_s),
             overpass_retries=_env_int("OVERPASS_RETRIES", defaults.overpass_retries),
             user_agent=os.getenv("OSM_USER_AGENT", defaults.user_agent),

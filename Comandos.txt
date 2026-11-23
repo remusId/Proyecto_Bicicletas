@@ -1,0 +1,7 @@
+Universidad Nacional de Ingeniería: -12.01972,-77.04861
+Estacion del metro de Lima Bayobar:: -11.95979,-76.98762
+Plaza Norte: -12.00630,-77.05879
+
+python -m app --origin=-12.01972,-77.04861 --dest=-11.95979,-76.98762 --provider overpass --plot --plot-out lima_prueba.png --no-summary
+
+python -m app --origin=-12.01972,-77.04861 --dest=-12.00630,-77.05879 --provider overpass --plot --plot-out lima_prueba.png --no-summary

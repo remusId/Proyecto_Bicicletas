@@ -78,6 +78,31 @@ class FakePathFinder(PathFinder):
         )
 
 
+@pytest.mark.parametrize("successful_attempt", [1, 2, 3])
+def test_alternative_planner_retries_in_order(successful_attempt: int) -> None:
+    class RetryFinder(AStarPathFinder):
+        def find_path(self, origin, dest):
+            attempts.append((origin, dest))
+            if len(attempts) <= successful_attempt:
+                raise NoRouteFoundError("Fallo simulado.")
+            return super().find_path(origin, dest)
+
+    graph = nx.MultiDiGraph()
+    for node, lon in enumerate((-3.0, -2.9999, -2.9998, -2.9961, -2.996)):
+        graph.add_node(node, lat=40.0, lon=lon)
+    for start, end in ((0, 1), (1, 2), (3, 4)):
+        graph.add_edge(start, end, highway="residential", length=20)
+    attempts = []
+    provider = FakeProvider(graph, origin_node=0, dest_node=4)
+    planner = RoutePlanner(provider, ShortestProfile(), RetryFinder(), _settings())
+    result = planner.plan_with_alternatives(Coordinate(40, -3), Coordinate(40, -2.996))
+
+    assert attempts == [(0, 4), (0, 2), (3, 4), (1, 2)][: successful_attempt + 1]
+    assert (result.origin_node, result.dest_node) == attempts[-1]
+    assert provider.load_calls == 1
+    assert any("alternativo aplicado" in warning for warning in result.warnings)
+
+
 def _settings(**overrides) -> Settings:
     return Settings(**overrides)
 
