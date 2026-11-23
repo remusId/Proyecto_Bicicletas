@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 if /i not "%~1"=="--bootstrap" (
-    wscript.exe "%~dp0lanzar_silencioso.vbs"
+    wscript.exe "%~dp0nereo.vbs"
     exit /b
 )
 if not exist ".venv\Scripts\pythonw.exe" (
