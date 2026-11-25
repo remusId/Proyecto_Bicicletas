@@ -1,0 +1,238 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+\title{Proyecto Final POO\\Rutas ciclistas sobre OpenStreetMap}
+\author{Explicación técnica e historial de cambios}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+\section*{Cómo leer este documento}
+Los fragmentos son extractos literales del repositorio. La leyenda indica
+el archivo, la versión y el rango de líneas original. Un extracto puede
+empezar dentro de una función y conserva la sangría del archivo. El documento
+incluye el código en su propio archivo \texttt{.tex}.
+
+\section{Fase 3. Diagnóstico, reintentos y bloqueo de la web}
+
+\textbf{Conceptos de esta fase.} Un grafo representa puntos como nodos y tramos como aristas. Una arista dirigida se recorre en el sentido indicado. Una componente débilmente conexa agrupa los nodos conectados al ignorar los sentidos.
+
+El comando UNI a Bayóvar usaba \texttt{-12.01972,-77.04861} como origen y \texttt{-11.95979,-76.98762} como destino. El grafo tenía dos componentes sin aristas transitables entre ellas. Los 9 m del diagnóstico son distancia en línea recta entre nodos, sin confirmar un cruce. Los recuentos variaron entre la descarga real y la caché.
+
+\subsection{Servicios: diagnóstico y alternativas}
+El diagnóstico distingue red vacía, un ajuste sin aristas transitables, componentes desconectadas y ausencia de un camino en el sentido solicitado. Después se incorporaron alternativas automáticas. El planificador prueba la ruta exacta, cambia primero el extremo que menos se desplaza, intenta el otro y luego prueba pares conectados cambiando ambos. Reutiliza el grafo y conserva los filtros y el límite de ajuste configurado. En UNI a Bayóvar se generó el PNG con el origen alternativo \texttt{-12.0167731,-77.0442788}, a 574 m en línea recta de la UNI. Ese acceso queda fuera del cálculo. Madrid mantuvo 1,14 km, 4,6 min, 2198 nodos y ajustes de 6,6 m y 1,2 m.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/diagnostics.py}} · versión actual, líneas 93--121.}\par
+\begin{Codigo}[firstnumber=93]
+    components = usable.to_undirected(as_view=True)
+    start_nodes = nx.node_connected_component(components, origin)
+    if dest not in start_nodes:
+        end_nodes = nx.node_connected_component(components, dest)
+        origin_points = _coordinates(graph, start_nodes)
+        dest_points = _coordinates(graph, end_nodes)
+        detail = (
+            f"Los puntos están en componentes ciclables distintas ({len(start_nodes):,} y "
+            f"{len(end_nodes):,} nodos, 0 aristas transitables entre ambas). "
+        )
+        if origin_points and dest_points:
+            distances, indices = cKDTree([_sphere(point) for point in dest_points]).query(
+                [_sphere(point) for point in origin_points]
+            )
+            nearest = int(distances.argmin())
+            first, second = origin_points[nearest], dest_points[int(indices[nearest])]
+            detail += (
+                f"Distancia mínima ≈ {first.distance_to(second):.0f} m. "
+                f"Puntos más cercanos: {first.lat:.6f},{first.lon:.6f} y "
+                f"{second.lat:.6f},{second.lon:.6f}. "
+            )
+        detail += (
+            "La separación es en línea recta y no confirma que se pueda cruzar. "
+            "Puedes ampliar el margen para buscar conexiones fuera del recorte."
+        )
+    elif not nx.has_path(usable, origin, dest):
+        detail = (
+            "Los puntos están en la misma componente, pero no hay camino en el sentido solicitado."
+        )
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{usable} es el grafo que contiene aristas admitidas por el perfil. \texttt{to\_undirected(as\_view=True)} devuelve una vista \texttt{components} que ignora el sentido para identificar grupos conectados. \texttt{nx} es NetworkX. \texttt{nx.node\_connected\_component(vista, nodo)} devuelve el conjunto de nodos accesibles en esa vista. \texttt{start\_nodes} y \texttt{end\_nodes} son esos conjuntos. \texttt{\_coordinates(grafo, nodos)} devuelve listas \texttt{origin\_points} y \texttt{dest\_points} con ubicaciones válidas. \texttt{len} cuenta nodos y \texttt{:,} añade separadores de miles al imprimir. \texttt{\_sphere(coordenada)} devuelve una terna numérica de la ubicación sobre la esfera unitaria. \texttt{cKDTree(puntos)} crea un índice espacial de SciPy; \texttt{query(otros\_puntos)} devuelve una colección \texttt{distances} y otra \texttt{indices} con los vecinos más próximos. \texttt{distances.argmin()} indica dónde está la menor distancia y \texttt{int} convierte su índice. \texttt{nearest} es ese índice; \texttt{first} y \texttt{second} son el par de coordenadas. \texttt{first.distance\_to(second)} devuelve metros y \texttt{:.0f} los muestra redondeados, mientras \texttt{:.6f} muestra seis decimales en las coordenadas. \texttt{detail} acumula el texto con \texttt{+=}. \texttt{nx.has\_path(grafo\_dirigido, origen, destino)} devuelve si existe un camino en el sentido pedido.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/diagnostics.py}} · versión actual, líneas 48--73.}\par
+\begin{Codigo}[firstnumber=48]
+    single_changes = []
+    if dest in points:
+        start = nearest(nx.ancestors(usable, dest) - {origin}, requested_origin)
+        if start is not None:
+            single_changes.append((start, dest))
+    if origin in points:
+        end = nearest(nx.descendants(usable, origin) - {dest}, requested_dest)
+        if end is not None:
+            single_changes.append((origin, end))
+    yield from sorted(single_changes, key=displacement)
+
+    double_changes = []
+    for component in nx.weakly_connected_components(usable):
+        start = nearest(
+            {
+                node
+                for node in component
+                if node != origin and any(end not in {node, dest} for end in usable[node])
+            },
+            requested_origin,
+        )
+        if start is not None:
+            end = nearest(nx.descendants(usable, start) - {dest}, requested_dest)
+            if end is not None:
+                double_changes.append((start, end))
+    yield from sorted(double_changes, key=displacement)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{points} asocia identificadores de nodos con coordenadas. \texttt{origin} y \texttt{dest} son los identificadores ajustados; \texttt{requested\_origin} y \texttt{requested\_dest} son los puntos originales. \texttt{nx.ancestors(grafo, nodo)} devuelve los nodos desde los que se puede llegar; \texttt{nx.descendants(grafo, nodo)} devuelve los alcanzables desde él. Restar \texttt{\{origin\}} o \texttt{\{dest\}} excluye el extremo que se busca cambiar. \texttt{nearest(nodos, coordenada)} devuelve el identificador más próximo entre los elegibles o \texttt{None}. \texttt{start} y \texttt{end} son esos identificadores opcionales. Las listas \texttt{single\_changes} y \texttt{double\_changes} guardan pares. \texttt{append(par)} agrega uno y \texttt{sorted(lista, key=displacement)} devuelve otra lista ordenada por el número que calcula \texttt{displacement(par)}, la suma de desplazamientos. \texttt{yield from} entrega los pares uno por uno. \texttt{nx.weakly\_connected\_components(grafo)} itera conjuntos \texttt{component} conectados al ignorar los sentidos. La comprensión crea los candidatos de cada grupo y \texttt{any(...)} comprueba que exista al menos un vecino de salida admisible. \texttt{usable[node]} expone los vecinos de salida de \texttt{node}.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · versión actual, líneas 105--122.}\par
+\begin{Codigo}[firstnumber=105]
+            pairs = retry_pairs(graph, self._profile, origin_node, dest_node, origin, dest)
+            for start, end in pairs if retry else ():
+                start_point = node_coordinate(graph, start) if start != origin_node else None
+                end_point = node_coordinate(graph, end) if end != dest_node else None
+                start_snap = origin_snap if start_point is None else origin.distance_to(start_point)
+                end_snap = dest_snap if end_point is None else dest.distance_to(end_point)
+                try:
+                    self._check_max_snap(start_snap, end_snap)
+                    search = finder.find_path(start, end)
+                except (NoRouteFoundError, SnapDistanceError):
+                    continue
+                if not math.isfinite(search.cost) or not math.isfinite(search.distance_m):
+                    continue
+                alternative_origin, alternative_dest = start_point, end_point
+                origin_node, dest_node = start, end
+                origin_snap, dest_snap = start_snap, end_snap
+                break
+            else:
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{retry\_pairs(grafo, perfil, dos identificadores, dos coordenadas)} devuelve \texttt{pairs}, un iterador de pares de nodos. \texttt{retry} es booleano; si está apagado se recorre la tupla vacía \texttt{()}. \texttt{start} y \texttt{end} desempaquetan cada par. \texttt{node\_coordinate(grafo, id)} devuelve \texttt{start\_point} o \texttt{end\_point}, una coordenada para el extremo cambiado. \texttt{origin\_snap} y \texttt{dest\_snap} son las distancias iniciales. Si se sustituye el punto, \texttt{distance\_to(coordenada)} calcula \texttt{start\_snap} o \texttt{end\_snap} en metros. \texttt{\_check\_max\_snap(distancias)} lanza un error si se supera el límite. \texttt{finder.find\_path(nodo\_inicial, nodo\_final)} devuelve \texttt{search} o lanza \texttt{NoRouteFoundError}; \texttt{math.isfinite(número)} devuelve si distancia y coste son válidos. \texttt{continue} prueba el siguiente candidato. Las asignaciones en pares actualizan los extremos y distancias. \texttt{break} termina con la primera ruta válida. El \texttt{else} del \texttt{for} corresponde al caso en que el bucle termina sin un \texttt{break}.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · versión actual, líneas 148--153.}\par
+\begin{Codigo}[firstnumber=148]
+                warnings.append(
+                    f"{label} alternativo aplicado: {point.lat},{point.lon} "
+                    f"({distance:.0f} m en línea recta del punto pedido). "
+                    "El tramo hasta el punto pedido queda fuera de la ruta."
+                )
+        speed_m_s = self._settings.bike_speed_kmh * 1000.0 / 3600.0
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{warnings} es una lista de textos. \texttt{label} identifica el extremo, \texttt{point} es la coordenada elegida y \texttt{distance} la separación en metros respecto del punto pedido. \texttt{append(texto)} agrega el aviso. Las cadenas adyacentes forman un solo mensaje y \texttt{:.0f} redondea la distancia para mostrarla. \texttt{speed\_m\_s} es la velocidad decimal convertida de km/h a m/s. El aviso describe el tramo que queda fuera del resultado.
+
+
+\subsection{Streamlit: solicitud pendiente sin bloquear}
+La preparación corre en un único hilo mediante \texttt{ThreadPoolExecutor}. El objeto \texttt{Future} representa el trabajo que puede seguir en curso. Antes, al pulsar Calcular, la web esperaba ese objeto en el hilo de la interfaz. Ahora guarda la solicitud pendiente y consulta si terminó. Cuando la red está lista, calcula o muestra el error. La web usa Overpass por defecto, igual que el comando usado durante las pruebas, y respeta \texttt{APP\_PROVIDER}.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 28--30.}\par
+\begin{Codigo}[firstnumber=28]
+@st.cache_resource
+def _graph_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="grafo")
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{st} es Streamlit. \texttt{@st.cache\_resource} guarda y reutiliza el objeto devuelto por la función. \texttt{ThreadPoolExecutor(max\_workers=1, thread\_name\_prefix='grafo')} devuelve un administrador de trabajos con un solo hilo trabajador. El prefijo identifica el hilo al depurar. La anotación \texttt{-\textgreater{} ThreadPoolExecutor} muestra qué objeto devuelve \texttt{\_graph\_executor()}.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 228--242.}\par
+\begin{Codigo}[firstnumber=228]
+        request = (route_settings, origin, dest)
+        if calculate:
+            st.session_state["pending_calculation"] = request
+        pending = st.session_state.get("pending_calculation") == request
+        if not pending:
+            st.session_state.pop("pending_calculation", None)
+        if pending or st.session_state["route_result"] is None:
+            planner, future = self._prefetch(route_settings, origin, dest)
+            if pending and future.done():
+                st.session_state.pop("pending_calculation")
+                self._calculate(planner, future, origin, dest)
+            else:
+                _prefetch_progress(future, pending)
+
+    def _coordinate_form(self, mode: str, point_key: str) -> None:
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{route\_settings} contiene opciones y \texttt{origin} y \texttt{dest} son coordenadas. \texttt{request} es una tupla de esos tres valores. \texttt{calculate} refleja si se pulsó el botón. \texttt{st.session\_state} guarda los valores entre ejecuciones de Streamlit. \texttt{get(clave)} devuelve el valor o \texttt{None}; \texttt{pop(clave, None)} elimina la clave y devuelve su valor o \texttt{None}. \texttt{pending} es el booleano que verifica que siga siendo la misma solicitud. \texttt{\_prefetch(configuración, origen, destino)} devuelve el planificador \texttt{planner} y el \texttt{Future} \texttt{future}. \texttt{future.done()} dice si terminó. \texttt{\_calculate(planificador, tarea, origen, destino)} recoge el resultado y actualiza la interfaz. \texttt{\_prefetch\_progress(tarea, pendiente)} muestra el avance o solicita una actualización posterior. Estas funciones actualizan la interfaz sin devolver un resultado útil a este fragmento.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 358--360.}\par
+\begin{Codigo}[firstnumber=358]
+        future = _graph_executor().submit(planner.prefetch, origin, dest)
+        st.session_state["prefetch"] = (key, planner, future)
+        return planner, future
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{\_graph\_executor()} devuelve el ejecutor de un hilo. \texttt{submit(función, origen, destino)} programa la llamada y devuelve \texttt{future}. \texttt{planner.prefetch} aparece sin paréntesis porque se entrega el método, que el ejecutor invocará con esos argumentos. Su trabajo prepara el grafo y devuelve \texttt{None}. \texttt{key} identifica la configuración y los puntos de esa preparación. Se guarda la tupla \texttt{(key, planner, future)} en el estado de Streamlit. La orden \texttt{return planner, future} devuelve ambos para reutilizar el trabajo.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 404--407.}\par
+\begin{Codigo}[firstnumber=404]
+    settings = Settings.from_env()
+    if os.getenv("APP_PROVIDER") is None:
+        settings = replace(settings, provider="overpass")
+    StreamlitApp(settings).run()
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{Settings.from\_env()} devuelve \texttt{settings}, una configuración construida a partir del entorno. \texttt{os} es un módulo estándar y \texttt{os.getenv('APP\_PROVIDER')} devuelve el valor de esa variable o \texttt{None}. \texttt{replace(settings, provider='overpass')}, de \texttt{dataclasses}, devuelve una copia modificada solo cuando no hubo selección explícita. \texttt{StreamlitApp(settings)} construye la aplicación y \texttt{run()} dibuja la interfaz; no devuelve un valor útil al llamador.
+
+
+\end{document}

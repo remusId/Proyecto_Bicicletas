@@ -1,0 +1,1155 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+\title{Proyecto Final POO\\Rutas ciclistas sobre OpenStreetMap}
+\author{Explicación técnica e historial de cambios}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+\section*{Cómo leer este documento}
+Los fragmentos son extractos literales del repositorio. La leyenda indica
+el archivo, la versión y el rango de líneas original. Un extracto puede
+empezar dentro de una función y conserva la sangría del archivo. El documento
+incluye el código en su propio archivo \texttt{.tex}.
+
+\section{Fase 0. El proyecto que recibí}
+El primer commit, \texttt{0307084} (\texttt{Hola}), ya era una aplicación funcional. El usuario elegía dos coordenadas. La app descargaba calles y caminos de OpenStreetMap, ajustaba los puntos a la red, ejecutaba un A* propio y mostraba el resultado en la terminal, en Streamlit o en un PNG. El informe inicial registró 50 pruebas aprobadas y una de red excluida por defecto.
+
+\subsection{Raíz, configuración y entrada}
+\texttt{pyproject.toml} declaraba Python 3.11 o superior, las dependencias y las herramientas de desarrollo. El entorno local \texttt{.venv} aislaba las bibliotecas. \texttt{.git} conservaba el historial y \texttt{.gitignore} excluía datos generados. También había un README, mapas PNG, archivos de caché y registros de Streamlit. El punto de entrada delegaba en la CLI y propagaba su código de salida.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/__main__.py}} · commit inicial 0307084, líneas 1--8.}\par
+\begin{Codigo}[firstnumber=1]
+"""Entrada para ``python -m app``."""
+
+from __future__ import annotations
+
+from app.ui.cli import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{pyproject.toml}} · commit inicial 0307084, líneas 6--22.}\par
+\begin{Codigo}[firstnumber=6]
+name = "proyecto-final-poo"
+version = "0.1.0"
+description = "Rutas ciclistas con A* propio sobre datos de OpenStreetMap"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "osmnx>=2.0.0",
+    "networkx>=3.2",
+    "requests>=2.31",
+    "folium>=0.16",
+    "streamlit>=1.38",
+    "streamlit-folium>=0.22",
+    "scipy>=1.13",
+]
+
+[project.optional-dependencies]
+dev = [
+\end{Codigo}
+
+\subsection{Dominio: coordenadas, área y resultado}
+Las coordenadas se validan para evitar latitudes, longitudes y números inválidos. El rectángulo de descarga incluye los dos puntos y un margen convertido de metros a grados. \texttt{RouteResult} reúne distancia, duración, nodos, geometría y métricas. La jerarquía de excepciones permite informar por separado de fallos de red, cobertura y rutas.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/models.py}} · commit inicial 0307084, líneas 30--54.}\par
+\begin{Codigo}[firstnumber=30]
+    def __post_init__(self) -> None:
+        try:
+            lat = float(self.lat)
+            lon = float(self.lon)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("La latitud y la longitud deben ser numéricas.") from exc
+        if not isfinite(lat) or not isfinite(lon):
+            raise ValueError("La latitud y la longitud deben ser finitas.")
+        if not -90.0 <= lat <= 90.0:
+            raise ValueError("La latitud debe estar entre -90 y 90.")
+        if not -180.0 <= lon <= 180.0:
+            raise ValueError("La longitud debe estar entre -180 y 180.")
+        object.__setattr__(self, "lat", lat)
+        object.__setattr__(self, "lon", lon)
+
+    @classmethod
+    def from_string(cls, value: str) -> Coordinate:
+        """Convierte ``"lat,lon"`` en una coordenada validada."""
+        parts = [part.strip() for part in value.split(",")]
+        if len(parts) != 2:
+            raise ValueError("El formato debe ser LAT,LON (por ejemplo 40.4168,-3.7038).")
+        try:
+            return cls(float(parts[0]), float(parts[1]))
+        except ValueError as exc:
+            raise ValueError("Las coordenadas deben ser números separados por una coma.") from exc
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/models.py}} · commit inicial 0307084, líneas 93--109.}\par
+\begin{Codigo}[firstnumber=93]
+
+        min_lat = min(first.lat, second.lat)
+        max_lat = max(first.lat, second.lat)
+        min_lon = min(first.lon, second.lon)
+        max_lon = max(first.lon, second.lon)
+
+        mid_lat = radians((min_lat + max_lat) / 2.0)
+        lat_pad = degrees(margin_m / EARTH_RADIUS_M)
+        lon_pad = degrees(margin_m / (EARTH_RADIUS_M * max(cos(mid_lat), 1e-6)))
+
+        south = max(-90.0, min_lat - lat_pad)
+        north = min(90.0, max_lat + lat_pad)
+        west = min_lon - lon_pad
+        east = max_lon + lon_pad
+        if west < -180.0 or east > 180.0:
+            raise ValueError("El área cruza el meridiano 180; elige puntos más cercanos.")
+        return cls(south=south, west=west, north=north, east=east)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/models.py}} · commit inicial 0307084, líneas 150--173.}\par
+\begin{Codigo}[firstnumber=150]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RouteResult:
+    """Resultado inmutable de una planificación de ruta."""
+
+    nodes: tuple[NodeId, ...]
+    distance_m: float
+    duration_s: float
+    nodes_expanded: int
+    backend: str
+    profile: str
+    algorithm: str
+    snap_origin_m: float
+    snap_dest_m: float
+    geometry: tuple[Coordinate, ...] = ()
+    warnings: tuple[str, ...] = ()
+    bbox: BoundingBox | None = None
+    weighted_cost: float | None = None
+    compute_time_s: float = 0.0
+    graph: Any = None
+    origin_node: NodeId | None = None
+    dest_node: NodeId | None = None
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/exceptions.py}} · commit inicial 0307084, líneas 6--23.}\par
+\begin{Codigo}[firstnumber=6]
+class RoutingError(Exception):
+    """Error base de la aplicación de rutas."""
+
+
+class NoRouteFoundError(RoutingError):
+    """No existe un camino entre el origen y el destino."""
+
+
+class AreaTooLargeError(RoutingError):
+    """El área solicitada supera el límite configurado."""
+
+
+class ProviderUnavailableError(RoutingError):
+    """El proveedor de datos no está disponible o devolvió datos inválidos."""
+
+
+class SnapDistanceError(RoutingError):
+    """Un punto está demasiado lejos de la red ciclable."""
+\end{Codigo}
+
+\subsection{Proveedores: OSMnx y Overpass directo}
+Ambos se alimentan de OpenStreetMap. OSMnx filtra la red para bicicleta, simplifica el grafo y conserva la componente principal. Proyecta el grafo y preserva latitud y longitud. El proveedor directo consulta Overpass, interpreta las etiquetas y construye un grafo de NetworkX con aristas dirigidas. Conserva varias componentes. La excepción \texttt{oneway:bicycle=no} permite recorrer en ambos sentidos una vía de un solo sentido para otros vehículos.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/osmnx_provider.py}} · commit inicial 0307084, líneas 130--135.}\par
+\begin{Codigo}[firstnumber=130]
+                return ox.graph_from_bbox(
+                    bbox.to_osmnx_tuple(),
+                    network_type=self._network_type,
+                    simplify=True,
+                    retain_all=False,
+                )
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/overpass_provider.py}} · commit inicial 0307084, líneas 51--61.}\par
+\begin{Codigo}[firstnumber=51]
+def _way_directions(tags: Mapping[str, Any]) -> tuple[bool, bool]:
+    """Devuelve ``(forward, backward)`` respetando oneway y oneway:bicycle."""
+    oneway = _tag_text(tags.get("oneway"))
+    bicycle_oneway = _tag_text(tags.get("oneway:bicycle"))
+    if bicycle_oneway in {"no", "false", "0"}:
+        return True, True
+    if oneway == "-1":
+        return False, True
+    if oneway in {"yes", "true", "1"}:
+        return True, False
+    return True, True
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/overpass_provider.py}} · commit inicial 0307084, líneas 140--145.}\par
+\begin{Codigo}[firstnumber=140]
+            if forward:
+                graph.add_edge(source, target, key=f"{way_id}:{index}:f", **data)
+            if backward:
+                reverse_data = dict(data)
+                reverse_data["reversed"] = True
+                graph.add_edge(target, source, key=f"{way_id}:{index}:r", **reverse_data)
+\end{Codigo}
+
+\subsection{Ruteo: A*, Dijkstra y perfiles}
+A* extrae el nodo de menor prioridad con \texttt{heapq}. La prioridad suma el coste recorrido y una estimación geográfica haversine. La cola solo se actualiza cuando aparece un coste mejor. Dijkstra reutiliza el motor con estimación cero, lo que permite comparar resultados. \texttt{shortest} usa la longitud. \texttt{bike} multiplica la longitud por un factor según la clase de calle. Ambos aplican restricciones de acceso y recorren los sentidos del grafo. Una ciclovía de 120 m puede ganar frente a una avenida principal de 100 m en \texttt{bike}, porque sus costes serían 120 y 155. El proyecto considera las conexiones registradas y carece de tráfico en vivo y de un coste por pendiente.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/astar.py}} · commit inicial 0307084, líneas 58--78.}\par
+\begin{Codigo}[firstnumber=58]
+        expanded = 0
+
+        while open_heap:
+            _, _, current = heapq.heappop(open_heap)
+            if current in closed:
+                continue
+            closed.add(current)
+            expanded += 1
+            if current == dest:
+                break
+
+            for neighbor, edge_data in self._out_edges(current):
+                edge_cost = profile.edge_cost(edge_data)
+                if not math.isfinite(edge_cost) or edge_cost < 0.0:
+                    continue
+                tentative = g_score[current] + edge_cost
+                if tentative < g_score.get(neighbor, math.inf):
+                    g_score[neighbor] = tentative
+                    came_from[neighbor] = (current, edge_data)
+                    priority = tentative + self._heuristic(neighbor, destination, scale)
+                    heapq.heappush(open_heap, (priority, next(counter), neighbor))
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/dijkstra.py}} · commit inicial 0307084, líneas 9--18.}\par
+\begin{Codigo}[firstnumber=9]
+class DijkstraPathFinder(AStarPathFinder):
+    """Dijkstra implementado con la misma cola de prioridad que A*."""
+
+    @property
+    def algorithm(self) -> str:
+        """Nombre del algoritmo."""
+        return "Dijkstra"
+
+    def _heuristic(self, node: NodeId, destination: Coordinate, scale: float) -> float:
+        return 0.0
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/profile.py}} · commit inicial 0307084, líneas 80--84.}\par
+\begin{Codigo}[firstnumber=80]
+    def edge_cost(self, edge_data: Mapping[str, Any]) -> float:
+        """Devuelve la longitud si la vía es ciclable."""
+        if self._forbidden(edge_data):
+            return math.inf
+        return _edge_length(edge_data)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/profile.py}} · commit inicial 0307084, líneas 156--165.}\par
+\begin{Codigo}[firstnumber=156]
+    def edge_cost(self, edge_data: Mapping[str, Any]) -> float:
+        """Aplica el multiplicador del tipo de vía a la longitud."""
+        if self._forbidden(edge_data):
+            return math.inf
+        length = _edge_length(edge_data)
+        if not math.isfinite(length):
+            return math.inf
+        highway = _tag_text(edge_data.get("highway"))
+        multiplier = self._multipliers.get(highway, self._multipliers["_default"])
+        return length * multiplier
+\end{Codigo}
+
+\subsection{Servicios: ajuste de puntos y caché}
+El planificador descargaba la zona, buscaba nodos transitables cerca del origen y destino, ejecutaba el buscador y estimaba la duración a partir de la velocidad. El ajuste filtra salidas para el origen y entradas para el destino. El límite inicial de área era 25 km². La caché distinguía el rectángulo, proveedor y perfil, y escribía primero a un temporal para publicar el grafo completo de forma atómica.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · commit inicial 0307084, líneas 60--84.}\par
+\begin{Codigo}[firstnumber=60]
+        bbox = BoundingBox.from_points(origin, dest, margin_m=self._settings.margin_m)
+        if bbox.area_km2 > self._settings.max_area_km2:
+            raise AreaTooLargeError(
+                f"El área de descarga ({bbox.area_km2:.2f} km²) supera el límite "
+                f"configurado ({self._settings.max_area_km2:.2f} km²). "
+                "Acerca los puntos o reduce el margen."
+            )
+
+        graph = self._provider.load_graph(bbox, profile=self._profile.name)
+        if graph.number_of_nodes() == 0:
+            raise ProviderUnavailableError(
+                "La red descargada está vacía. No hay cobertura ciclable en el área."
+            )
+
+        origin_node, origin_snap = self._snap(graph, origin, arriving=False)
+        dest_node, dest_snap = self._snap(graph, dest, arriving=True)
+        warnings = self._snap_warnings(origin_snap, dest_snap)
+        self._check_max_snap(origin_snap, dest_snap)
+
+        search = self._pathfinder.bind(graph, self._profile).find_path(origin_node, dest_node)
+        if not math.isfinite(search.cost) or not math.isfinite(search.distance_m):
+            raise NoRouteFoundError("La ruta calculada no tiene una distancia válida.")
+
+        speed_m_s = self._settings.bike_speed_kmh * 1000.0 / 3600.0
+        duration_s = search.distance_m / speed_m_s
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · commit inicial 0307084, líneas 119--122.}\par
+\begin{Codigo}[firstnumber=119]
+        usable = self._usable_nodes(graph, arriving=arriving)
+        if not usable:
+            return self._provider.nearest_node(graph, coordinate)
+        return self._provider.nearest_node(graph.subgraph(usable), coordinate)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/cache.py}} · commit inicial 0307084, líneas 74--82.}\par
+\begin{Codigo}[firstnumber=74]
+        fd, temp_name = tempfile.mkstemp(prefix=f".{key}.", suffix=".tmp", dir=self._directory)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                pickle.dump(graph, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            Path(temp_name).replace(path)
+        finally:
+            temp_path = Path(temp_name)
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+\end{Codigo}
+
+\subsection{Interfaces, visualización, scripts y pruebas}
+\texttt{ui/} contiene la CLI y la interfaz interactiva. Folium genera un mapa Leaflet con marcadores y una polilínea. Matplotlib renderiza la red, geometría, etiquetas, flechas, escala y norte en PNG. \texttt{scripts/} incluía una utilidad para descargar grafos o importar JSON y XML. \texttt{docs/} conservaba el diagrama de clases en Mermaid. \texttt{tests/} aportaba un grafo sintético, una respuesta Overpass guardada y pruebas independientes de la red para el trabajo diario.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/map_renderer.py}} · commit inicial 0307084, líneas 31--40.}\par
+\begin{Codigo}[firstnumber=31]
+        if result is not None and result.geometry:
+            locations = [(point.lat, point.lon) for point in result.geometry]
+            folium.PolyLine(
+                locations,
+                color="#1565c0",
+                weight=6,
+                opacity=0.85,
+                tooltip="Ruta ciclista",
+            ).add_to(fmap)
+            latitudes = [point[0] for point in locations]
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/visualization/plotter.py}} · commit inicial 0307084, líneas 123--150.}\par
+\begin{Codigo}[firstnumber=123]
+        try:
+            self._configure_axes(ax, extent)
+            if self._draw_basemap(ax):
+                self._collect_labels(graph, extent)
+            else:
+                self._draw_network(ax, graph, extent)
+
+            self._draw_route(ax, route_pts)
+            self._draw_direction_arrows(ax, route_pts)
+
+            origin = self._node_xy(graph, getattr(result, "origin_node", None))
+            dest = self._node_xy(graph, getattr(result, "dest_node", None))
+            reserved = self._draw_endpoints(ax, origin, dest)
+            self._draw_scale_bar(ax, extent)
+            self._draw_north_arrow(ax)
+            self._draw_title(ax, result)
+            self._draw_attribution(ax)
+
+            if self.labels:
+                self._draw_labels(ax, graph, extent, reserved)
+
+            fig.savefig(out_path, dpi=self.dpi, facecolor=fig.get_facecolor())
+        finally:
+            plt.close(fig)
+
+        if show:
+            self._open_file(out_path)
+        return out_path
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/descargar_grafo.py}} · commit inicial 0307084, líneas 117--126.}\par
+\begin{Codigo}[firstnumber=117]
+def _load_from_json(path: Path) -> nx.MultiDiGraph:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return parse_overpass_payload(payload)
+
+
+def _load_from_xml(path: Path) -> nx.MultiDiGraph:
+    graph = ox.graph_from_xml(path, simplify=True, retain_all=False)
+    if graph.number_of_nodes() == 0 or graph.number_of_edges() == 0:
+        raise ValueError("El XML no contiene una red válida.")
+    return OsmnxProvider._project_and_keep_latlon(graph)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_astar.py}} · commit inicial 0307084, líneas 18--28.}\par
+\begin{Codigo}[firstnumber=18]
+def test_abstract_classes_cannot_be_instantiated() -> None:
+    with pytest.raises(TypeError):
+        CostProfile()  # type: ignore[abstract]
+    with pytest.raises(TypeError):
+        PathFinder()  # type: ignore[abstract]
+
+
+def test_astar_matches_networkx_dijkstra_on_twenty_pairs(synthetic_graph) -> None:
+    rng = random.Random(2026)
+    profile = ShortestProfile()
+    finder = AStarPathFinder(synthetic_graph, profile)
+\end{Codigo}
+
+\section{Fase 1. Arranque, vista, búsqueda y proveedores}
+La primera entrega debía abrir con doble clic. Después incorporé la persistencia del mapa, la búsqueda por nombres y la recuperación frente a fallos de Overpass.
+
+\subsection{Raíz y scripts: BAT, VBS y arranque local}
+El BAT es un archivo de comandos de Windows. \texttt{\%\string~dp0} localiza la carpeta del lanzador, incluso con espacios. El BAT prepara el entorno si hace falta y arranca Python. Un VBS es un script de VBScript que Windows puede ejecutar mediante \texttt{wscript.exe}. El valor cero en \texttt{shell.Run} oculta la consola. Originalmente se llamó \texttt{lanzar\_silencioso.vbs} y después quedó como \texttt{nereo.vbs}. El lanzador Python busca un puerto, espera al endpoint de salud y abre el navegador. Comprobé ambos lanzadores y el uso de un puerto alternativo cuando 8501 estaba ocupado.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{iniciar_app.bat}} · versión actual, líneas 1--19.}\par
+\begin{Codigo}[firstnumber=1]
+@echo off
+setlocal
+cd /d "%~dp0"
+if /i not "%~1"=="--bootstrap" (
+    wscript.exe "%~dp0nereo.vbs"
+    exit /b
+)
+if not exist ".venv\Scripts\pythonw.exe" (
+    py -3 -m venv .venv || exit /b 1
+)
+if not exist ".venv\rutas-instalado" (
+    ".venv\Scripts\python.exe" -m pip show proyecto-final-poo >nul 2>&1
+    if errorlevel 1 (
+        ".venv\Scripts\python.exe" -m pip install --upgrade pip || exit /b 1
+        ".venv\Scripts\python.exe" -m pip install -e ".[dev]" || exit /b 1
+    )
+    type nul > ".venv\rutas-instalado"
+)
+start "" ".venv\Scripts\pythonw.exe" "%~dp0scripts\lanzar_app.py"
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{nereo.vbs}} · versión actual, líneas 1--10.}\par
+\begin{Codigo}[firstnumber=1]
+Option Explicit
+Dim shell, files, root, command, result
+Set shell = CreateObject("WScript.Shell")
+Set files = CreateObject("Scripting.FileSystemObject")
+root = files.GetParentFolderName(WScript.ScriptFullName)
+command = "cmd.exe /d /c " & Chr(34) & Chr(34) & root & "\iniciar_app.bat" & Chr(34) & " --bootstrap" & Chr(34)
+result = shell.Run(command, 0, True)
+If result <> 0 Then
+    MsgBox "No se pudo preparar la aplicación. Comprueba que Python 3.11 o superior y el lanzador py estén instalados y que tengas conexión a Internet.", 16, "Rutas ciclistas"
+End If
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/lanzar_app.py}} · versión actual, líneas 18--26.}\par
+\begin{Codigo}[firstnumber=18]
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", 8501))
+            except OSError:
+                sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+
+        url = f"http://127.0.0.1:{port}"
+        log = root / ".venv" / "lanzador.log"
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/lanzar_app.py}} · versión actual, líneas 51--65.}\par
+\begin{Codigo}[firstnumber=51]
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline and process.poll() is None:
+            try:
+                with urlopen(f"{url}/_stcore/health", timeout=1) as response:
+                    if response.read().strip() == b"ok" and process.poll() is None:
+                        if not webbrowser.open(url):
+                            ctypes.windll.user32.MessageBoxW(
+                                0, f"Abre {url} en tu navegador.", "Rutas ciclistas", 0
+                            )
+                        return
+            except (URLError, TimeoutError):
+                time.sleep(0.25)
+        raise RuntimeError(f"Revisa el registro {log} e inténtalo de nuevo.")
+    except (OSError, RuntimeError) as exc:
+        if process is not None and process.poll() is None:
+\end{Codigo}
+
+\subsection{Servicios e interfaces: persistencia y búsqueda por nombre}
+El estado de la vista se guarda en JSON en el perfil del usuario. Los valores inválidos recuperan la vista predeterminada, que inicialmente es Madrid. Nominatim transforma textos en coordenadas. El servicio usa \texttt{requests}, limita y serializa peticiones y guarda los resultados durante siete días. La CLI incorporó \texttt{--geocode}, \texttt{--origin-place} y \texttt{--dest-place}. En la web se puede elegir un resultado y fijarlo como origen o destino. La búsqueda real de Plaza Norte entregó una coordenada a unos 6 m de la referencia.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/ui_state.py}} · versión actual, líneas 37--52.}\par
+\begin{Codigo}[firstnumber=37]
+    def __init__(self, path: Path | None = None) -> None:
+        local = os.getenv("LOCALAPPDATA")
+        default = (
+            Path(local) / "RutasCiclistas" if local else Path.home() / ".config/rutas-ciclistas"
+        )
+        self.path = path or Path(os.getenv("APP_UI_STATE", str(default / "ui_state.json")))
+
+    def load(self, fallback: MapView) -> MapView:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return MapView(Coordinate(data["lat"], data["lon"]), data["zoom"])
+        except (OSError, ValueError, TypeError, KeyError):
+            return fallback
+
+    def save(self, view: MapView) -> None:
+        write_json(self.path, {"lat": view.center.lat, "lon": view.center.lon, "zoom": view.zoom})
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/geocoder.py}} · versión actual, líneas 85--96.}\par
+\begin{Codigo}[firstnumber=85]
+                last = data.get("last")
+                if isinstance(last, (int, float)) and 0 <= now - last < 1:
+                    time.sleep(1 - (now - last))
+                data = {"last": time.time(), "entries": entries}
+                write_json(self._path, data)
+                payload = self._request(query)
+                results = self._parse(payload)
+                entries[key] = {"at": time.time(), "results": payload}
+                if len(entries) > MAX_ENTRIES:
+                    oldest = min(entries, key=lambda name: float(entries[name]["at"]))
+                    del entries[oldest]
+                write_json(self._path, data)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/geocoder.py}} · versión actual, líneas 121--128.}\par
+\begin{Codigo}[firstnumber=121]
+            response = requests.get(
+                self._url,
+                params={"q": query, "format": "jsonv2", "limit": 5, "accept-language": "es"},
+                headers={"User-Agent": self._user_agent},
+                timeout=8,
+            )
+        except requests.RequestException as exc:
+            raise ProviderUnavailableError(
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/cli.py}} · versión actual, líneas 50--61.}\par
+\begin{Codigo}[firstnumber=50]
+            if args.geocode is not None:
+                if any((args.origin, args.dest, args.origin_place, args.dest_place)):
+                    raise ValueError("--geocode se usa sin argumentos de origen y destino.")
+                places = geocoder.search(args.geocode)
+                if not places:
+                    raise ValueError("No se encontraron lugares. Añade la ciudad o el distrito.")
+                for place in places:
+                    print(f"{place.name} ({place.latlon})")
+                print("Datos: © OpenStreetMap contributors")
+                print(places[0].latlon)
+                return 0
+            if not (args.origin or args.origin_place) or not (args.dest or args.dest_place):
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 303--305.}\par
+\begin{Codigo}[firstnumber=303]
+            if selected is not None and st.button(f"Usar como {mode.lower()}"):
+                self._set_point("origin" if mode == "Origen" else "dest", selected.coordinate)
+                self._recenter(selected.coordinate)
+\end{Codigo}
+
+\subsection{Proveedores: reintentos secuenciales}
+El proveedor directo pasó a probar servidores en orden. Usa un presupuesto total, demoras crecientes y \texttt{Retry-After} cuando corresponde. El mensaje final aporta los servidores e intentos. Probé el paso al siguiente servidor con HTTP 502 simulado. El dominio antiguo de Kumi agotó el tiempo en la prueba real y la consulta corta funcionó usando los espejos configurados después.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/overpass_provider.py}} · versión actual, líneas 312--367.}\par
+\begin{Codigo}[firstnumber=312]
+    def _request(self, query: str) -> dict[str, Any]:
+        deadline = time.monotonic() + self._deadline_s
+        tried = []
+        total = 0
+        for index, url in enumerate(self._urls):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            endpoint_deadline = time.monotonic() + remaining / (len(self._urls) - index)
+            attempts = 0
+            retryable = True
+            for attempt in range(1, self._retries + 1):
+                remaining = endpoint_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                attempts += 1
+                retry_after = None
+                try:
+                    response = self._session.post(
+                        url, data={"data": query}, timeout=min(self._timeout_s, remaining)
+                    )
+                except requests.Timeout:
+                    last_error = "timeout"
+                except requests.RequestException:
+                    last_error = "error de conexión"
+                else:
+                    status = response.status_code
+                    if status == 200:
+                        return self._decode(response)
+                    last_error = f"HTTP {status}"
+                    if status != 429 and not 500 <= status < 600:
+                        retryable = False
+                        break
+                    retry_after = response.headers.get("Retry-After")
+                    if status == 429 and retry_after is None:
+                        retry_after = "30"
+                if attempt < self._retries:
+                    delay = self._retry_delay(attempt, retry_after)
+                    if delay >= endpoint_deadline - time.monotonic():
+                        break
+                    time.sleep(delay)
+            if attempts:
+                total += attempts
+                try:
+                    host = urlsplit(url).hostname or "servidor sin nombre"
+                except ValueError:
+                    host = "URL inválida"
+                tried.append(f"{host} ({attempts}, {last_error})")
+            if not retryable:
+                break
+        raise ProviderUnavailableError(
+            f"Overpass no está disponible tras {total} intentos. "
+            f"Servidores probados: {', '.join(tried) or 'ninguno'}. "
+            "Reintenta en unos minutos, elige OSMnx (--provider osmnx) "
+            "o define OVERPASS_URL para usar otro servidor."
+        )
+\end{Codigo}
+
+\section{Fase 2. Coordenadas separadas, área, zoom y progreso}
+La web usaba un campo común para el desplazamiento del mapa. A raíz del reporte, el formulario pasó a leer y guardar el valor del extremo elegido. Cada extremo tiene su propia clave.
+
+\subsection{UI: origen y destino independientes}
+Al fijar un punto se actualiza exclusivamente su clave, se invalida el resultado anterior y se centra el mapa.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 242--264.}\par
+\begin{Codigo}[firstnumber=242]
+    def _coordinate_form(self, mode: str, point_key: str) -> None:
+        current: Coordinate | None = st.session_state[point_key]
+        value = f"{current.lat},{current.lon}" if current is not None else ""
+        name = mode.lower()
+        with st.form(f"coordinates_{point_key}"):
+            raw = st.text_input(
+                f"Coordenadas de {name} (LAT,LON)",
+                value=value,
+                key=f"{point_key}_coordinates_{value}",
+            )
+            if st.form_submit_button(f"Fijar {name}"):
+                try:
+                    coordinate = Coordinate.from_string(raw)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    self._set_point(point_key, coordinate)
+                    self._recenter(coordinate)
+
+    @staticmethod
+    def _set_point(point_key: str, coordinate: Coordinate) -> None:
+        st.session_state[point_key] = coordinate
+        st.session_state["route_result"] = None
+\end{Codigo}
+
+\subsection{Configuración y mapa: área automática y zoom estable}
+La web y la terminal amplían el área al tamaño requerido por los puntos y el margen. La CLI admite un límite manual explícito. Para evitar que el mapa se pusiera blanco y regresara a su posición inicial, el centro y el zoom iniciales del componente se mantienen estables mientras se guardan los cambios informados por Leaflet.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/config.py}} · versión actual, líneas 92--97.}\par
+\begin{Codigo}[firstnumber=92]
+    def with_area_for(self, origin: Coordinate, dest: Coordinate) -> Settings:
+        """Amplía el límite base hasta cubrir los puntos y el margen."""
+        area = BoundingBox.from_points(origin, dest, self.margin_m).area_km2
+        if area <= self.max_area_km2:
+            return self
+        return replace(self, max_area_km2=area)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 171--194.}\par
+\begin{Codigo}[firstnumber=171]
+        if st.session_state.get("map_points") != (origin, dest):
+            st.session_state["map_points"] = (origin, dest)
+            st.session_state["map_initial_view"] = view
+        initial_view = st.session_state["map_initial_view"]
+
+        map_obj = self._renderer.render(
+            origin=origin,
+            dest=dest,
+            center=initial_view.center,
+            zoom=initial_view.zoom,
+        )
+        map_output = st_folium(
+            map_obj,
+            height=480,
+            key=f"click_map_{st.session_state.get('map_revision', 0)}",
+            returned_objects=["last_clicked", "center", "zoom"],
+        )
+        if isinstance(map_output, dict) and map_output.get("center"):
+            center = map_output["center"]
+            with suppress(ValueError, TypeError, KeyError):
+                self._save_view(
+                    MapView(Coordinate(center["lat"], center["lng"]), map_output["zoom"])
+                )
+        clicked = map_output.get("last_clicked") if isinstance(map_output, dict) else None
+\end{Codigo}
+
+\subsection{Terminal y web: progreso, PNG y resumen}
+La barra indica etapas de preparación, cálculo y generación de imagen. El proveedor carece de un porcentaje de descarga que pueda mostrarse. \texttt{--no-summary} oculta métricas e instrucciones por calle y mantiene progreso y avisos. \texttt{--no-show} guarda el PNG sin ventana. \texttt{--no-plot} omite el PNG. Para pares negativos se usa, por ejemplo, \texttt{--origin=-12.01972,-77.04861}.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/cli.py}} · versión actual, líneas 78--85.}\par
+\begin{Codigo}[firstnumber=78]
+            self._progress(0, "Preparando red ciclista (caché o descarga)…")
+            planner.prefetch(origin, dest)
+            self._progress(1, "Red lista. Calculando ruta…")
+            result = planner.plan_with_alternatives(origin, dest)
+        except (RoutingError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            if isinstance(exc, RoutingError) and exc.diagnostic:
+                print(f"Diagnóstico\n{exc.diagnostic}", file=sys.stderr)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/cli.py}} · versión actual, líneas 95--121.}\par
+\begin{Codigo}[firstnumber=95]
+        if not args.no_summary:
+            self._print_result(result)
+            self._print_instructions(result)
+        elif result.alternative_origin is not None or result.alternative_dest is not None:
+            for warning in result.warnings:
+                print(f"Aviso: {warning}", file=sys.stderr)
+        # Generar visualización si está activada
+        if getattr(args, "plot", True):
+            self._progress(2, "Ruta calculada. Generando el mapa…")
+            try:
+                plotter = RoutePlotter(
+                    margin_m=args.margin_m,
+                    dpi=args.dpi,
+                    labels=not args.no_labels,
+                    basemap=None if args.basemap == "none" else args.basemap,
+                )
+                out_path = getattr(args, "plot_out", "route.png") or "route.png"
+                no_show = getattr(args, "no_show", False)
+                plotter.render(result, out_path=out_path, show=not no_show)
+                for note in plotter.warnings:
+                    print(f"Aviso: {note}", file=sys.stderr)
+            except Exception as exc:
+                print(f"Aviso: no se pudo generar la imagen: {exc}", file=sys.stderr)
+                return 0
+            self._progress(3, "Ruta y mapa listos.")
+        else:
+            self._progress(3, "Ruta calculada.")
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 52--66.}\par
+\begin{Codigo}[firstnumber=52]
+def _prefetch_progress(future: Future[None], calculate_when_ready: bool = False) -> None:
+    if not future.done():
+        message = "Preparando red ciclista (caché o descarga)…"
+        if calculate_when_ready:
+            message += " La ruta se calculará al terminar."
+        st.progress(0, text=message)
+    elif calculate_when_ready:
+        st.rerun()
+    elif not future.cancelled() and future.exception() is None:
+        st.progress(50, text="Red lista. Pulsa Calcular ruta.")
+    else:
+        st.warning("No se pudo preparar la red. Pulsa Calcular ruta para ver el detalle.")
+
+
+class StreamlitApp:
+\end{Codigo}
+
+\section{Fase 3. Diagnóstico, reintentos y bloqueo de la web}
+El comando UNI a Bayóvar usaba \texttt{-12.01972,-77.04861} como origen y \texttt{-11.95979,-76.98762} como destino. El grafo tenía dos componentes sin aristas transitables entre ellas. Los 9 m del diagnóstico son distancia en línea recta entre nodos, sin confirmar un cruce. Los recuentos variaron entre la descarga real y la caché.
+
+\subsection{Servicios: diagnóstico y alternativas}
+El diagnóstico distingue red vacía, un ajuste sin aristas transitables, componentes desconectadas y ausencia de un camino en el sentido solicitado. Después se incorporaron alternativas automáticas. El planificador prueba la ruta exacta, cambia primero el extremo que menos se desplaza, intenta el otro y luego prueba pares conectados cambiando ambos. Reutiliza el grafo y conserva los filtros y el límite de ajuste configurado. En UNI a Bayóvar se generó el PNG con el origen alternativo \texttt{-12.0167731,-77.0442788}, a 574 m en línea recta de la UNI. Ese acceso queda fuera del cálculo. Madrid mantuvo 1,14 km, 4,6 min, 2198 nodos y ajustes de 6,6 m y 1,2 m.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/diagnostics.py}} · versión actual, líneas 93--121.}\par
+\begin{Codigo}[firstnumber=93]
+    components = usable.to_undirected(as_view=True)
+    start_nodes = nx.node_connected_component(components, origin)
+    if dest not in start_nodes:
+        end_nodes = nx.node_connected_component(components, dest)
+        origin_points = _coordinates(graph, start_nodes)
+        dest_points = _coordinates(graph, end_nodes)
+        detail = (
+            f"Los puntos están en componentes ciclables distintas ({len(start_nodes):,} y "
+            f"{len(end_nodes):,} nodos, 0 aristas transitables entre ambas). "
+        )
+        if origin_points and dest_points:
+            distances, indices = cKDTree([_sphere(point) for point in dest_points]).query(
+                [_sphere(point) for point in origin_points]
+            )
+            nearest = int(distances.argmin())
+            first, second = origin_points[nearest], dest_points[int(indices[nearest])]
+            detail += (
+                f"Distancia mínima ≈ {first.distance_to(second):.0f} m. "
+                f"Puntos más cercanos: {first.lat:.6f},{first.lon:.6f} y "
+                f"{second.lat:.6f},{second.lon:.6f}. "
+            )
+        detail += (
+            "La separación es en línea recta y no confirma que se pueda cruzar. "
+            "Puedes ampliar el margen para buscar conexiones fuera del recorte."
+        )
+    elif not nx.has_path(usable, origin, dest):
+        detail = (
+            "Los puntos están en la misma componente, pero no hay camino en el sentido solicitado."
+        )
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/diagnostics.py}} · versión actual, líneas 48--73.}\par
+\begin{Codigo}[firstnumber=48]
+    single_changes = []
+    if dest in points:
+        start = nearest(nx.ancestors(usable, dest) - {origin}, requested_origin)
+        if start is not None:
+            single_changes.append((start, dest))
+    if origin in points:
+        end = nearest(nx.descendants(usable, origin) - {dest}, requested_dest)
+        if end is not None:
+            single_changes.append((origin, end))
+    yield from sorted(single_changes, key=displacement)
+
+    double_changes = []
+    for component in nx.weakly_connected_components(usable):
+        start = nearest(
+            {
+                node
+                for node in component
+                if node != origin and any(end not in {node, dest} for end in usable[node])
+            },
+            requested_origin,
+        )
+        if start is not None:
+            end = nearest(nx.descendants(usable, start) - {dest}, requested_dest)
+            if end is not None:
+                double_changes.append((start, end))
+    yield from sorted(double_changes, key=displacement)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · versión actual, líneas 105--122.}\par
+\begin{Codigo}[firstnumber=105]
+            pairs = retry_pairs(graph, self._profile, origin_node, dest_node, origin, dest)
+            for start, end in pairs if retry else ():
+                start_point = node_coordinate(graph, start) if start != origin_node else None
+                end_point = node_coordinate(graph, end) if end != dest_node else None
+                start_snap = origin_snap if start_point is None else origin.distance_to(start_point)
+                end_snap = dest_snap if end_point is None else dest.distance_to(end_point)
+                try:
+                    self._check_max_snap(start_snap, end_snap)
+                    search = finder.find_path(start, end)
+                except (NoRouteFoundError, SnapDistanceError):
+                    continue
+                if not math.isfinite(search.cost) or not math.isfinite(search.distance_m):
+                    continue
+                alternative_origin, alternative_dest = start_point, end_point
+                origin_node, dest_node = start, end
+                origin_snap, dest_snap = start_snap, end_snap
+                break
+            else:
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · versión actual, líneas 148--153.}\par
+\begin{Codigo}[firstnumber=148]
+                warnings.append(
+                    f"{label} alternativo aplicado: {point.lat},{point.lon} "
+                    f"({distance:.0f} m en línea recta del punto pedido). "
+                    "El tramo hasta el punto pedido queda fuera de la ruta."
+                )
+        speed_m_s = self._settings.bike_speed_kmh * 1000.0 / 3600.0
+\end{Codigo}
+
+\subsection{Streamlit: solicitud pendiente sin bloquear}
+La preparación corre en un único hilo mediante \texttt{ThreadPoolExecutor}. El objeto \texttt{Future} representa el trabajo que puede seguir en curso. Antes, al pulsar Calcular, la web esperaba ese objeto en el hilo de la interfaz. Ahora guarda la solicitud pendiente y consulta si terminó. Cuando la red está lista, calcula o muestra el error. La web usa Overpass por defecto, igual que el comando usado durante las pruebas, y respeta \texttt{APP\_PROVIDER}.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 28--30.}\par
+\begin{Codigo}[firstnumber=28]
+@st.cache_resource
+def _graph_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="grafo")
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 228--242.}\par
+\begin{Codigo}[firstnumber=228]
+        request = (route_settings, origin, dest)
+        if calculate:
+            st.session_state["pending_calculation"] = request
+        pending = st.session_state.get("pending_calculation") == request
+        if not pending:
+            st.session_state.pop("pending_calculation", None)
+        if pending or st.session_state["route_result"] is None:
+            planner, future = self._prefetch(route_settings, origin, dest)
+            if pending and future.done():
+                st.session_state.pop("pending_calculation")
+                self._calculate(planner, future, origin, dest)
+            else:
+                _prefetch_progress(future, pending)
+
+    def _coordinate_form(self, mode: str, point_key: str) -> None:
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 358--360.}\par
+\begin{Codigo}[firstnumber=358]
+        future = _graph_executor().submit(planner.prefetch, origin, dest)
+        st.session_state["prefetch"] = (key, planner, future)
+        return planner, future
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 404--407.}\par
+\begin{Codigo}[firstnumber=404]
+    settings = Settings.from_env()
+    if os.getenv("APP_PROVIDER") is None:
+        settings = replace(settings, provider="overpass")
+    StreamlitApp(settings).run()
+\end{Codigo}
+
+\section{Fase 4. Ejecutable autónomo y control del almacenamiento}
+La carpeta original llevaba 698 MiB de entorno virtual y 309 MiB de caché. Un entorno virtual depende de rutas y componentes del equipo donde se creó. El archivo distribuible quedó en \texttt{dist/RutasCiclistas.exe}, pesa 154 MiB y está destinado a Windows x64. Incluye Python y las bibliotecas. El mapa base, la búsqueda y la descarga inicial de grafos usan Internet.
+
+\subsection{Scripts y distribución: cómo se creó el EXE}
+PowerShell ejecuta la receta de compilación. PyInstaller recoge el intérprete, bibliotecas, módulos y recursos web. \texttt{--onefile} empaqueta un único binario y \texttt{--windowed} evita la consola. Al abrirlo, el programa usa un puerto local y lanza el navegador tras verificar el estado del servidor. El modo de producción se fija explícitamente porque la copia empaquetada de Streamlit podía interpretar su ubicación como una instalación de desarrollo. El arranque autónomo y la apertura del navegador se comprobaron desde una carpeta aislada con Python fuera de PATH, en este Windows.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/compilar_windows.ps1}} · versión actual, líneas 1--14.}\par
+\begin{Codigo}[firstnumber=1]
+$ErrorActionPreference = 'Stop'
+$Project = Split-Path -Parent $PSScriptRoot
+Push-Location $Project
+try {
+    $WebSource = Join-Path $Project 'src/app/ui/streamlit_app.py'
+    & '.\.venv\Scripts\python.exe' -m PyInstaller --noconfirm --onefile --windowed `
+        --name RutasCiclistas --specpath build --workpath build --distpath dist `
+        --paths src --collect-all streamlit --collect-all streamlit_folium `
+        --recursive-copy-metadata streamlit --copy-metadata osmnx `
+        --add-data "${WebSource}:web" scripts/desktop_entry.py
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar RutasCiclistas.exe.' }
+} finally {
+    Pop-Location
+}
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/desktop_entry.py}} · versión actual, líneas 39--70.}\par
+\begin{Codigo}[firstnumber=39]
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+    from streamlit.web import bootstrap
+
+    # Importación explícita para que PyInstaller recoja las dependencias de la UI.
+    from app.ui import streamlit_app
+
+    os.environ.setdefault("APP_CACHE_DIR", str(data_dir / "cache" / "graphs"))
+    os.environ.setdefault("APP_GEOCODE_CACHE", str(data_dir / "cache" / "geocode.json"))
+    script = Path(__file__).resolve().parent / "web" / Path(streamlit_app.__file__).name
+    if "--verificar" in sys.argv:
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(str(script), default_timeout=45).run()
+        if app.exception:
+            raise RuntimeError(str(app.exception))
+        print(app.title[0].value)
+        return
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    options = {
+        "global.developmentMode": False,
+        "server.address": "127.0.0.1",
+        "server.port": port,
+        "server.headless": True,
+        "server.fileWatcherType": "none",
+        "browser.gatherUsageStats": False,
+    }
+    bootstrap.load_config_options(flag_options=options)
+    Thread(target=open_when_ready, args=(f"http://127.0.0.1:{port}",), daemon=True).start()
+    bootstrap.run(str(script), False, [], options)
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/desktop_entry.py}} · versión actual, líneas 17--31.}\par
+\begin{Codigo}[firstnumber=17]
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(f"{url}/_stcore/health", timeout=1) as response:
+                ready = response.read().strip() == b"ok"
+        except (URLError, TimeoutError):
+            time.sleep(0.25)
+            continue
+        if ready:
+            if not webbrowser.open(url):
+                show_message(f"Abre {url} en tu navegador.")
+            else:
+                print(f"Navegador abierto: {url}")
+            return
+    show_message("El servidor local no respondió. Revisa el registro en RutasCiclistas.")
+\end{Codigo}
+
+\subsection{Servicios y barra lateral: caché automática y manual}
+El EXE usa el directorio del perfil local de Windows. La caché de grafos y descargas de OSMnx caduca a los 14 días y tiene una cuota conjunta de 150 MiB. Se eliminan primero los archivos más antiguos. Las búsquedas tienen una vigencia de siete días y se limitan a 250 entradas. El botón Limpiar caché elimina los archivos de red reconocidos y las búsquedas guardadas. Las pruebas comprueban que los archivos ajenos se conservan.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/cache.py}} · versión actual, líneas 19--22.}\par
+\begin{Codigo}[firstnumber=19]
+GRAPH_TTL_S = 14 * 24 * 3600
+GRAPH_CACHE_LIMIT_BYTES = 150 * 1024**2
+_GRAPH_NAME = re.compile(r"(?:osmnx|overpass)_[\w.-]+_.+_[a-f0-9]{12}\.pkl")
+_OSMNX_NAME = re.compile(r"[a-f0-9]{40}\.json")
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/cache.py}} · versión actual, líneas 122--133.}\par
+\begin{Codigo}[firstnumber=122]
+        total = sum(size for _, size, _ in entries)
+        removed = 0
+        for age, size, path in sorted(entries):
+            if age > cutoff and total <= max_bytes:
+                break
+            with suppress(OSError):
+                current = path.lstat()
+                if current.st_mtime == age and current.st_size == size:
+                    path.unlink()
+                    total -= size
+                    removed += 1
+        return removed
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/geocoder.py}} · versión actual, líneas 18--19.}\par
+\begin{Codigo}[firstnumber=18]
+TTL_S = 7 * 24 * 3600
+MAX_ENTRIES = 250
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 33--48.}\par
+\begin{Codigo}[firstnumber=33]
+@st.cache_data(ttl=3600)
+def _prune_cache(directory: Path) -> int:
+    return GraphCache(directory, enabled=False).prune()
+
+
+@st.fragment(run_every=3600)
+def _cache_controls(directory: Path, user_agent: str) -> None:
+    _prune_cache(directory)
+    if st.button("Limpiar caché"):
+        removed = GraphCache(directory, enabled=False).clear()
+        try:
+            NominatimGeocoder(user_agent).clear_cache()
+        except OSError:
+            st.warning("No se pudo limpiar la caché de lugares.")
+        else:
+            st.success(f"Caché limpiada. Archivos de red eliminados: {removed}.")
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_cache.py}} · versión actual, líneas 61--66.}\par
+\begin{Codigo}[firstnumber=61]
+    assert cache.prune() == 2
+    assert recent.exists()
+    assert unrelated.exists()
+    assert cache.clear() == 1
+    assert not recent.exists()
+    assert unrelated.exists()
+\end{Codigo}
+
+\section{Documentación y verificación}
+Corregí la línea final del README que mezclaba UTF-16LE con UTF-8 y documenté las funciones nuevas. \texttt{docs/} conserva el diagrama Mermaid. \texttt{pytest} ejecuta pruebas de servicios y algoritmos. \texttt{AppTest} simula interacciones de Streamlit. Ruff valida estilo y formato. El historial registra las mejoras web y el cambio de nombre del VBS. Los cambios de empaquetado y caché estaban en la carpeta de trabajo al redactar este documento. La última suite registrada pasó 65 pruebas y dejó dos pruebas de red excluidas por defecto.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_streamlit_app.py}} · versión actual, líneas 115--123.}\par
+\begin{Codigo}[firstnumber=115]
+        assert not future.done()
+        assert app.session_state["prefetch"][2] is future
+        assert app.session_state["pending_calculation"]
+    finally:
+        release.set()
+    future.result(timeout=5)
+    app.run()
+    assert not app.exception
+    assert app.session_state["route_result"] == result
+\end{Codigo}
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_planner.py}} · versión actual, líneas 100--103.}\par
+\begin{Codigo}[firstnumber=100]
+    assert attempts == [(0, 4), (0, 2), (3, 4), (1, 2)][: successful_attempt + 1]
+    assert (result.origin_node, result.dest_node) == attempts[-1]
+    assert provider.load_calls == 1
+    assert any("alternativo aplicado" in warning for warning in result.warnings)
+\end{Codigo}
+
+\end{document}
+```[cite: 1]
+
+### How to verify it builds and produces a PDF
+1. **In an online editor (such as Overleaf):** Set the compiler to **XeLaTeX** (or **LuaLaTeX**) in the project compiler settings if available; with the `iftex` fallback above, it will still compile even if the runner stays on `pdflatex`. *Verification:* The log ends without `Emergency stop` and the PDF viewer displays the title page and table of contents.
+2. **In a local terminal:** Run `xelatex -interaction=nonstopmode documento.tex` twice (or `pdflatex -interaction=nonstopmode documento.tex` twice if testing the fallback). *Verification:* Both runs exit with code `0` and `documento.pdf` exists with non-zero file size.

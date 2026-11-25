@@ -16,6 +16,7 @@ from app.domain.models import Coordinate
 from app.services.ui_state import write_json
 
 TTL_S = 7 * 24 * 3600
+MAX_ENTRIES = 250
 
 
 @contextmanager
@@ -50,11 +51,11 @@ class Place:
 
 
 class NominatimGeocoder:
-    def __init__(self, user_agent: str, cache_path: Path = Path(".cache/geocode.json")) -> None:
+    def __init__(self, user_agent: str, cache_path: Path | None = None) -> None:
         if not user_agent.strip():
             raise ValueError("Configura un User-Agent identificable para Nominatim.")
         self._user_agent = user_agent
-        self._path = cache_path
+        self._path = cache_path or Path(os.getenv("APP_GEOCODE_CACHE", ".cache/geocode.json"))
         self._url = os.getenv("APP_NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
 
     def search(self, query: str) -> tuple[Place, ...]:
@@ -89,6 +90,9 @@ class NominatimGeocoder:
                 payload = self._request(query)
                 results = self._parse(payload)
                 entries[key] = {"at": time.time(), "results": payload}
+                if len(entries) > MAX_ENTRIES:
+                    oldest = min(entries, key=lambda name: float(entries[name]["at"]))
+                    del entries[oldest]
                 write_json(self._path, data)
                 return results
         except OSError as exc:
@@ -97,6 +101,13 @@ class NominatimGeocoder:
             ) from exc
         except (ValueError, TypeError, KeyError) as exc:
             raise ProviderUnavailableError("Nominatim devolvió resultados inválidos.") from exc
+
+    def clear_cache(self) -> None:
+        """Borra las búsquedas guardadas y conserva el límite de frecuencia."""
+        with _local_lock(self._path.with_suffix(".lock")):
+            data = self._read()
+            if data:
+                write_json(self._path, {"last": data.get("last"), "entries": {}})
 
     def _read(self) -> dict:
         try:

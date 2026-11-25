@@ -1,0 +1,5 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Fase 1. Arranque, vista, búsqueda y proveedores}{2}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Raíz y scripts: BAT, VBS y arranque local}{2}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Servicios e interfaces: persistencia y búsqueda por nombre}{4}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Proveedores: reintentos secuenciales}{7}{subsection.1.3}%

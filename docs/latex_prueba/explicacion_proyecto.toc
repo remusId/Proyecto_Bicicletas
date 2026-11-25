@@ -1,0 +1,23 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Fase 0. El proyecto que recibí}{2}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Raíz, configuración y entrada}{2}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Dominio: coordenadas, área y resultado}{3}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Proveedores: OSMnx y Overpass directo}{5}{subsection.1.3}%
+\contentsline {subsection}{\numberline {1.4}Ruteo: A*, Dijkstra y perfiles}{5}{subsection.1.4}%
+\contentsline {subsection}{\numberline {1.5}Servicios: ajuste de puntos y caché}{7}{subsection.1.5}%
+\contentsline {subsection}{\numberline {1.6}Interfaces, visualización, scripts y pruebas}{8}{subsection.1.6}%
+\contentsline {section}{\numberline {2}Fase 1. Arranque, vista, búsqueda y proveedores}{9}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Raíz y scripts: BAT, VBS y arranque local}{9}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Servicios e interfaces: persistencia y búsqueda por nombre}{11}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Proveedores: reintentos secuenciales}{13}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Fase 2. Coordenadas separadas, área, zoom y progreso}{14}{section.3}%
+\contentsline {subsection}{\numberline {3.1}UI: origen y destino independientes}{14}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Configuración y mapa: área automática y zoom estable}{14}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Terminal y web: progreso, PNG y resumen}{15}{subsection.3.3}%
+\contentsline {section}{\numberline {4}Fase 3. Diagnóstico, reintentos y bloqueo de la web}{17}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Servicios: diagnóstico y alternativas}{17}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Streamlit: solicitud pendiente sin bloquear}{19}{subsection.4.2}%
+\contentsline {section}{\numberline {5}Fase 4. Ejecutable autónomo y control del almacenamiento}{20}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Scripts y distribución: cómo se creó el EXE}{20}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Servicios y barra lateral: caché automática y manual}{21}{subsection.5.2}%
+\contentsline {section}{\numberline {6}Documentación y verificación}{23}{section.6}%

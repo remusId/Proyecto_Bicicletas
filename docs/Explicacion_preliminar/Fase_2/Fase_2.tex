@@ -1,0 +1,224 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+\title{Proyecto Final POO\\Rutas ciclistas sobre OpenStreetMap}
+\author{Explicación técnica e historial de cambios}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+\section*{Cómo leer este documento}
+Los fragmentos son extractos literales del repositorio. La leyenda indica
+el archivo, la versión y el rango de líneas original. Un extracto puede
+empezar dentro de una función y conserva la sangría del archivo. El documento
+incluye el código en su propio archivo \texttt{.tex}.
+
+\section{Fase 2. Coordenadas separadas, área, zoom y progreso}
+
+\textbf{Conceptos de esta fase.} Streamlit ejecuta de nuevo el código de la interfaz al usar sus controles. El estado de sesión guarda datos entre ejecuciones. CLI significa interfaz de línea de comandos.
+
+La web usaba un campo común para el desplazamiento del mapa. A raíz del reporte, el formulario pasó a leer y guardar el valor del extremo elegido. Cada extremo tiene su propia clave.
+
+\subsection{UI: origen y destino independientes}
+Al fijar un punto se actualiza exclusivamente su clave, se invalida el resultado anterior y se centra el mapa.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 242--264.}\par
+\begin{Codigo}[firstnumber=242]
+    def _coordinate_form(self, mode: str, point_key: str) -> None:
+        current: Coordinate | None = st.session_state[point_key]
+        value = f"{current.lat},{current.lon}" if current is not None else ""
+        name = mode.lower()
+        with st.form(f"coordinates_{point_key}"):
+            raw = st.text_input(
+                f"Coordenadas de {name} (LAT,LON)",
+                value=value,
+                key=f"{point_key}_coordinates_{value}",
+            )
+            if st.form_submit_button(f"Fijar {name}"):
+                try:
+                    coordinate = Coordinate.from_string(raw)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    self._set_point(point_key, coordinate)
+                    self._recenter(coordinate)
+
+    @staticmethod
+    def _set_point(point_key: str, coordinate: Coordinate) -> None:
+        st.session_state[point_key] = coordinate
+        st.session_state["route_result"] = None
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{self} es la interfaz; \texttt{mode} y \texttt{point\_key} son textos. \texttt{st.session\_state[clave]} guarda valores entre reejecuciones. \texttt{current} es una \texttt{Coordinate} o \texttt{None}. \texttt{value} es el texto inicial y \texttt{name} una copia de \texttt{mode} en minúsculas obtenida con \texttt{lower()}. Las f-strings interpolan valores y la expresión condicional produce una cadena vacía si el punto falta. \texttt{st.form(identificador)} crea el contexto del formulario. \texttt{st.text\_input(etiqueta, value=..., key=...)} devuelve \texttt{raw}, el texto introducido. \texttt{st.form\_submit\_button(etiqueta)} devuelve un booleano. \texttt{Coordinate.from\_string(texto)} devuelve \texttt{coordinate} o lanza \texttt{ValueError}. \texttt{st.error(str(exc))} muestra el mensaje y \texttt{str} convierte el error a texto. El \texttt{else} del \texttt{try} solo actúa si se pudo convertir. \texttt{\_set\_point(clave, coordenada)} cambia ese extremo e invalida \texttt{route\_result}. \texttt{@staticmethod} indica que la función no recibe \texttt{self} automáticamente. \texttt{\_recenter(coordenada)} actualiza la posición del mapa. Ambos métodos devuelven \texttt{None}.
+
+
+\subsection{Configuración y mapa: área automática y zoom estable}
+La web y la terminal amplían el área al tamaño requerido por los puntos y el margen. La CLI admite un límite manual explícito. Para evitar que el mapa se pusiera blanco y regresara a su posición inicial, el centro y el zoom iniciales del componente se mantienen estables mientras se guardan los cambios informados por Leaflet.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/config.py}} · versión actual, líneas 92--97.}\par
+\begin{Codigo}[firstnumber=92]
+    def with_area_for(self, origin: Coordinate, dest: Coordinate) -> Settings:
+        """Amplía el límite base hasta cubrir los puntos y el margen."""
+        area = BoundingBox.from_points(origin, dest, self.margin_m).area_km2
+        if area <= self.max_area_km2:
+            return self
+        return replace(self, max_area_km2=area)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{origin} y \texttt{dest} son coordenadas y \texttt{self} representa la configuración \texttt{Settings}. \texttt{BoundingBox.from\_points(origen, destino, margen\_en\_metros)} devuelve el rectángulo. Su atributo \texttt{area\_km2} da \texttt{area}, un número decimal. \texttt{\textless{}=} comprueba si cabe en el límite. \texttt{replace} pertenece a \texttt{dataclasses}, biblioteca estándar de Python: \texttt{replace(objeto, campo=valor)} devuelve una copia con el campo modificado, apropiada cuando las opciones se tratan como valores inmutables.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 171--194.}\par
+\begin{Codigo}[firstnumber=171]
+        if st.session_state.get("map_points") != (origin, dest):
+            st.session_state["map_points"] = (origin, dest)
+            st.session_state["map_initial_view"] = view
+        initial_view = st.session_state["map_initial_view"]
+
+        map_obj = self._renderer.render(
+            origin=origin,
+            dest=dest,
+            center=initial_view.center,
+            zoom=initial_view.zoom,
+        )
+        map_output = st_folium(
+            map_obj,
+            height=480,
+            key=f"click_map_{st.session_state.get('map_revision', 0)}",
+            returned_objects=["last_clicked", "center", "zoom"],
+        )
+        if isinstance(map_output, dict) and map_output.get("center"):
+            center = map_output["center"]
+            with suppress(ValueError, TypeError, KeyError):
+                self._save_view(
+                    MapView(Coordinate(center["lat"], center["lng"]), map_output["zoom"])
+                )
+        clicked = map_output.get("last_clicked") if isinstance(map_output, dict) else None
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{origin} y \texttt{dest} son coordenadas opcionales. \texttt{view} e \texttt{initial\_view} son objetos \texttt{MapView} con centro y zoom. \texttt{st.session\_state.get(clave, predeterminado)} lee estado persistente durante la sesión. \texttt{!=} compara la tupla de puntos con la anterior. \texttt{\_renderer.render(origin=..., dest=..., center=..., zoom=...)} devuelve \texttt{map\_obj}, un mapa Folium. \texttt{st\_folium(mapa, height=..., key=..., returned\_objects=...)} integra el mapa y devuelve \texttt{map\_output}, un diccionario de eventos. \texttt{key} identifica el componente; se construye con una revisión entera. \texttt{isinstance(valor, dict)} valida el tipo y \texttt{get} permite leer campos opcionales. \texttt{center} es el diccionario con latitud y longitud; \texttt{clicked} es otro diccionario o \texttt{None}. \texttt{suppress(tipos\_de\_error)} viene de \texttt{contextlib} y omite los errores enumerados dentro del \texttt{with}. \texttt{Coordinate(latitud,longitud)} y \texttt{MapView(coordenada,zoom)} construyen los valores; \texttt{\_save\_view(vista)} los persiste si cambian.
+
+
+\subsection{Terminal y web: progreso, PNG y resumen}
+La barra indica etapas de preparación, cálculo y generación de imagen. El proveedor carece de un porcentaje de descarga que pueda mostrarse. \texttt{--no-summary} oculta métricas e instrucciones por calle y mantiene progreso y avisos. \texttt{--no-show} guarda el PNG sin ventana. \texttt{--no-plot} omite el PNG. Para pares negativos se usa, por ejemplo, \texttt{--origin=-12.01972,-77.04861}.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/cli.py}} · versión actual, líneas 78--85.}\par
+\begin{Codigo}[firstnumber=78]
+            self._progress(0, "Preparando red ciclista (caché o descarga)…")
+            planner.prefetch(origin, dest)
+            self._progress(1, "Red lista. Calculando ruta…")
+            result = planner.plan_with_alternatives(origin, dest)
+        except (RoutingError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            if isinstance(exc, RoutingError) and exc.diagnostic:
+                print(f"Diagnóstico\n{exc.diagnostic}", file=sys.stderr)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{planner} es un planificador y \texttt{origin}, \texttt{dest} son coordenadas. \texttt{\_progress(etapa\_entera, mensaje)} imprime el estado; \texttt{planner.prefetch(origen,destino)} prepara la red y devuelve \texttt{None}; \texttt{plan\_with\_alternatives(origen,destino)} devuelve \texttt{result}, un \texttt{RouteResult}. \texttt{except (RoutingError, ValueError) as exc} captura cualquiera de esos errores. \texttt{sys.stderr} es el canal de errores de la terminal. \texttt{print(texto, file=canal)} escribe allí; \texttt{isinstance} comprueba si el error admite un \texttt{diagnostic}, un mensaje opcional. La secuencia \texttt{\textbackslash{}n} representa un salto de línea.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/cli.py}} · versión actual, líneas 95--121.}\par
+\begin{Codigo}[firstnumber=95]
+        if not args.no_summary:
+            self._print_result(result)
+            self._print_instructions(result)
+        elif result.alternative_origin is not None or result.alternative_dest is not None:
+            for warning in result.warnings:
+                print(f"Aviso: {warning}", file=sys.stderr)
+        # Generar visualización si está activada
+        if getattr(args, "plot", True):
+            self._progress(2, "Ruta calculada. Generando el mapa…")
+            try:
+                plotter = RoutePlotter(
+                    margin_m=args.margin_m,
+                    dpi=args.dpi,
+                    labels=not args.no_labels,
+                    basemap=None if args.basemap == "none" else args.basemap,
+                )
+                out_path = getattr(args, "plot_out", "route.png") or "route.png"
+                no_show = getattr(args, "no_show", False)
+                plotter.render(result, out_path=out_path, show=not no_show)
+                for note in plotter.warnings:
+                    print(f"Aviso: {note}", file=sys.stderr)
+            except Exception as exc:
+                print(f"Aviso: no se pudo generar la imagen: {exc}", file=sys.stderr)
+                return 0
+            self._progress(3, "Ruta y mapa listos.")
+        else:
+            self._progress(3, "Ruta calculada.")
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{args} guarda opciones de la CLI y \texttt{result} es el resultado de ruta. \texttt{\_print\_result(resultado)} y \texttt{\_print\_instructions(resultado)} escriben resumen e indicaciones. \texttt{elif} evalúa otra condición si la primera falló. \texttt{warning} y \texttt{note} son textos de aviso. \texttt{getattr(objeto, nombre, predeterminado)} lee un atributo o usa el valor de respaldo. \texttt{RoutePlotter(margin\_m=..., dpi=..., labels=..., basemap=...)} crea \texttt{plotter}, el renderizador; margen y resolución son números, etiquetas es booleano y fondo es texto o \texttt{None}. \texttt{out\_path} es la ruta de salida y \texttt{no\_show} un booleano; \texttt{not} lo invierte para activar \texttt{show}. \texttt{plotter.render(resultado, out\_path=..., show=...)} escribe el PNG y devuelve su ruta. \texttt{plotter.warnings} es la colección de avisos. La excepción \texttt{exc} preserva el fallo del PNG y \texttt{return 0} indica que el cálculo de la ruta ya había tenido éxito.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 52--66.}\par
+\begin{Codigo}[firstnumber=52]
+def _prefetch_progress(future: Future[None], calculate_when_ready: bool = False) -> None:
+    if not future.done():
+        message = "Preparando red ciclista (caché o descarga)…"
+        if calculate_when_ready:
+            message += " La ruta se calculará al terminar."
+        st.progress(0, text=message)
+    elif calculate_when_ready:
+        st.rerun()
+    elif not future.cancelled() and future.exception() is None:
+        st.progress(50, text="Red lista. Pulsa Calcular ruta.")
+    else:
+        st.warning("No se pudo preparar la red. Pulsa Calcular ruta para ver el detalle.")
+
+
+class StreamlitApp:
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{Future[None]} representa una tarea que podrá terminar más tarde y cuyo trabajo devuelve \texttt{None}. \texttt{future} representa la preparación del grafo. \texttt{calculate\_when\_ready} es booleano con valor inicial \texttt{False}. \texttt{future.done()} y \texttt{future.cancelled()} devuelven booleanos. \texttt{future.exception()} devuelve el error o \texttt{None} cuando la tarea terminó. \texttt{message} es texto y \texttt{+=} concatena otra frase. \texttt{st.progress(entero, text=...)} muestra una etapa y devuelve el componente que se puede actualizar. \texttt{st.rerun()} solicita una nueva ejecución de la interfaz. \texttt{st.warning(texto)} muestra un aviso. La rama de progreso distingue una preparación pendiente de una ya disponible.
+
+
+\end{document}

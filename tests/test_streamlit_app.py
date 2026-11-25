@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Event
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from app.domain.models import BoundingBox, Coordinate, RouteResult
@@ -14,6 +15,12 @@ from app.services.ui_state import MapView, ViewStore
 APP_PATH = Path(__file__).parents[1] / "src" / "app" / "ui" / "streamlit_app.py"
 
 
+@pytest.fixture(autouse=True)
+def isolate_cache(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_CACHE_DIR", str(tmp_path / "graphs"))
+    monkeypatch.setenv("APP_GEOCODE_CACHE", str(tmp_path / "geocode.json"))
+
+
 def test_streamlit_app_starts_without_exceptions() -> None:
     app = AppTest.from_file(APP_PATH, default_timeout=60).run()
     assert not app.exception
@@ -21,10 +28,23 @@ def test_streamlit_app_starts_without_exceptions() -> None:
     assert len(app.radio) == 1
     assert {button.label for button in app.button} == {
         "Fijar origen",
+        "Fijar destino",
         "Buscar",
         "Calcular ruta",
         "Limpiar puntos",
+        "Limpiar caché",
     }
+    assert not app.sidebar.selectbox
+    assert {widget.label: widget.value for widget in app.selectbox} == {
+        "Backend de datos": "overpass",
+        "Perfil": "bike",
+        "Algoritmo": "astar",
+    }
+    assert {widget.label: widget.value for widget in app.number_input} == {
+        "Velocidad media (km/h)": 15.0,
+        "Margen del bbox (km)": 1.0,
+    }
+    assert "proyecto academico" not in str(app.caption)
 
 
 def test_streamlit_keeps_coordinate_view_in_new_session(tmp_path, monkeypatch) -> None:
@@ -48,9 +68,9 @@ def test_coordinate_form_keeps_origin_and_destination_independent(tmp_path, monk
     app.text_input[0].set_value("40.4168,-3.7038")
     next(button for button in app.button if button.label == "Fijar origen").click().run()
     app.radio[0].set_value("Destino").run()
-    assert app.text_input[0].value == ""
+    assert app.text_input[1].value == ""
 
-    app.text_input[0].set_value("40.47,-3.65")
+    app.text_input[1].set_value("40.47,-3.65")
     next(button for button in app.button if button.label == "Fijar destino").click().run()
     app.radio[0].set_value("Origen").run()
     assert app.text_input[0].value == "40.4168,-3.7038"
@@ -66,9 +86,10 @@ def test_coordinate_form_keeps_origin_and_destination_independent(tmp_path, monk
     assert not next(button for button in app.button if button.label == "Calcular ruta").disabled
 
     app.radio[0].set_value("Destino").run()
-    assert app.text_input[0].value == "40.47,-3.65"
+    assert app.text_input[1].value == "40.47,-3.65"
     next(button for button in app.button if button.label == "Limpiar puntos").click().run()
     assert app.text_input[0].value == ""
+    assert app.text_input[1].value == ""
     assert app.session_state["origin"] is None
     assert app.session_state["dest"] is None
 

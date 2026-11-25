@@ -1,0 +1,267 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+\title{Proyecto Final POO\\Rutas ciclistas sobre OpenStreetMap}
+\author{Explicación técnica e historial de cambios}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+\section*{Cómo leer este documento}
+Los fragmentos son extractos literales del repositorio. La leyenda indica
+el archivo, la versión y el rango de líneas original. Un extracto puede
+empezar dentro de una función y conserva la sangría del archivo. El documento
+incluye el código en su propio archivo \texttt{.tex}.
+
+\section{Fase 4. Ejecutable autónomo y control del almacenamiento}
+
+\textbf{Conceptos de esta fase.} Un ejecutable es un archivo que Windows inicia directamente. Una caché guarda datos para reutilizarlos. MiB equivale a 1 048 576 bytes. Un hilo permite trabajar en una tarea separada.
+
+La carpeta original llevaba 698 MiB de entorno virtual y 309 MiB de caché. Un entorno virtual depende de rutas y componentes del equipo donde se creó. El archivo distribuible quedó en \texttt{dist/RutasCiclistas.exe}, pesa 154 MiB y está destinado a Windows x64. Incluye Python y las bibliotecas. El mapa base, la búsqueda y la descarga inicial de grafos usan Internet.
+
+\subsection{Scripts y distribución: cómo se creó el EXE}
+PowerShell ejecuta la receta de compilación. PyInstaller recoge el intérprete, bibliotecas, módulos y recursos web. \texttt{--onefile} empaqueta un único binario y \texttt{--windowed} evita la consola. Al abrirlo, el programa usa un puerto local y lanza el navegador tras verificar el estado del servidor. El modo de producción se fija explícitamente porque la copia empaquetada de Streamlit podía interpretar su ubicación como una instalación de desarrollo. El arranque autónomo y la apertura del navegador se comprobaron desde una carpeta aislada con Python fuera de PATH, en este Windows.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/compilar_windows.ps1}} · versión actual, líneas 1--14.}\par
+\begin{Codigo}[firstnumber=1]
+$ErrorActionPreference = 'Stop'
+$Project = Split-Path -Parent $PSScriptRoot
+Push-Location $Project
+try {
+    $WebSource = Join-Path $Project 'src/app/ui/streamlit_app.py'
+    & '.\.venv\Scripts\python.exe' -m PyInstaller --noconfirm --onefile --windowed `
+        --name RutasCiclistas --specpath build --workpath build --distpath dist `
+        --paths src --collect-all streamlit --collect-all streamlit_folium `
+        --recursive-copy-metadata streamlit --copy-metadata osmnx `
+        --add-data "${WebSource}:web" scripts/desktop_entry.py
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar RutasCiclistas.exe.' }
+} finally {
+    Pop-Location
+}
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} Este bloque está escrito en PowerShell, un intérprete de Windows. \texttt{\$} introduce variables. \texttt{\$ErrorActionPreference = 'Stop'} detiene el script ante errores de PowerShell. \texttt{\$PSScriptRoot} contiene la ruta del script; \texttt{Split-Path -Parent ruta} devuelve su carpeta superior, guardada en \texttt{\$Project}. \texttt{Push-Location} guarda la ubicación previa y entra al proyecto. \texttt{Join-Path base segmento} combina rutas y crea \texttt{\$WebSource}. \texttt{\&} ejecuta la ruta indicada de Python. \texttt{-m PyInstaller} ejecuta el empaquetador. \texttt{--noconfirm} permite sustituir salidas de compilación; \texttt{--name} fija el nombre; \texttt{--specpath}, \texttt{--workpath} y \texttt{--distpath} indican dónde quedan la receta, los temporales y el resultado. \texttt{--paths} agrega una ruta de importación. \texttt{--collect-all} incluye módulos y recursos, y \texttt{--copy-metadata} recoge información del paquete; la opción recursiva también incluye dependencias. \texttt{--add-data} copia el script de la interfaz a \texttt{web} dentro del paquete; \texttt{\$\{WebSource\}} delimita el nombre de variable antes de los dos puntos. El acento grave al final continúa el comando en la línea siguiente. \texttt{-ne} prueba desigualdad y \texttt{\$LASTEXITCODE} almacena el entero devuelto por PyInstaller. \texttt{throw} crea un error y \texttt{finally} garantiza que \texttt{Pop-Location} restaure la carpeta.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/desktop_entry.py}} · versión actual, líneas 39--70.}\par
+\begin{Codigo}[firstnumber=39]
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+    from streamlit.web import bootstrap
+
+    # Importación explícita para que PyInstaller recoja las dependencias de la UI.
+    from app.ui import streamlit_app
+
+    os.environ.setdefault("APP_CACHE_DIR", str(data_dir / "cache" / "graphs"))
+    os.environ.setdefault("APP_GEOCODE_CACHE", str(data_dir / "cache" / "geocode.json"))
+    script = Path(__file__).resolve().parent / "web" / Path(streamlit_app.__file__).name
+    if "--verificar" in sys.argv:
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(str(script), default_timeout=45).run()
+        if app.exception:
+            raise RuntimeError(str(app.exception))
+        print(app.title[0].value)
+        return
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    options = {
+        "global.developmentMode": False,
+        "server.address": "127.0.0.1",
+        "server.port": port,
+        "server.headless": True,
+        "server.fileWatcherType": "none",
+        "browser.gatherUsageStats": False,
+    }
+    bootstrap.load_config_options(flag_options=options)
+    Thread(target=open_when_ready, args=(f"http://127.0.0.1:{port}",), daemon=True).start()
+    bootstrap.run(str(script), False, [], options)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{os.environ} es el diccionario de entorno del proceso; sus valores son cadenas. La primera asignación obliga a usar el modo de producción. \texttt{from streamlit.web import bootstrap} trae el módulo de arranque de Streamlit. \texttt{from app.ui import streamlit\_app} trae la interfaz del subpaquete \texttt{ui} y permite que PyInstaller la detecte. \texttt{setdefault(clave, valor)} conserva un valor existente y devuelve el que queda guardado. \texttt{data\_dir} es la ruta local. \texttt{Path(\_\_file\_\_).resolve()} calcula la ruta absoluta del archivo actual, \texttt{parent} su carpeta y \texttt{name} el nombre del archivo. \texttt{script} queda como ruta del programa web empaquetado. \texttt{sys.argv} contiene argumentos de la línea de comandos. \texttt{from streamlit.testing.v1 import AppTest} importa una clase de pruebas de interfaz. \texttt{AppTest.from\_file(ruta, default\_timeout=45)} crea una prueba; \texttt{run()} la ejecuta y devuelve \texttt{app}. \texttt{app.exception} contiene errores y \texttt{app.title[0].value} el texto del título. \texttt{RuntimeError} detiene una verificación fallida. \texttt{socket.socket()} abre \texttt{listener}; \texttt{bind((IP,0))} selecciona un puerto local y \texttt{getsockname()[1]} devuelve su número entero \texttt{port}. \texttt{options} es el diccionario de configuración. \texttt{load\_config\_options(flag\_options=...)} aplica esas opciones. \texttt{Thread(target=función, args=tupla, daemon=True)} devuelve un hilo; \texttt{start()} inicia la espera de salud. La coma en \texttt{args=(URL,)} crea una tupla de un elemento. \texttt{bootstrap.run(ruta, False, [], opciones)} inicia Streamlit en modo normal, sin argumentos para su script, y mantiene el servidor en ejecución.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/desktop_entry.py}} · versión actual, líneas 17--31.}\par
+\begin{Codigo}[firstnumber=17]
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(f"{url}/_stcore/health", timeout=1) as response:
+                ready = response.read().strip() == b"ok"
+        except (URLError, TimeoutError):
+            time.sleep(0.25)
+            continue
+        if ready:
+            if not webbrowser.open(url):
+                show_message(f"Abre {url} en tu navegador.")
+            else:
+                print(f"Navegador abierto: {url}")
+            return
+    show_message("El servidor local no respondió. Revisa el registro en RutasCiclistas.")
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{url} es la dirección del servidor y \texttt{deadline} el instante máximo obtenido sumando 45 a \texttt{time.monotonic()}, en segundos. \texttt{urlopen(URL, timeout=1)} devuelve una respuesta HTTP o lanza \texttt{URLError} o \texttt{TimeoutError}. \texttt{with} garantiza cerrar \texttt{response}; \texttt{read()} obtiene bytes y \texttt{strip()} limpia bordes. \texttt{b'ok'} es un literal de bytes. La comparación produce el booleano \texttt{ready}. \texttt{time.sleep(0.25)} retrasa el siguiente intento y \texttt{continue} regresa al bucle. \texttt{webbrowser.open(URL)} devuelve si pudo solicitar la apertura. \texttt{show\_message(texto)} muestra un cuadro de Windows y devuelve \texttt{None}; \texttt{print(texto)} registra que el navegador abrió. \texttt{return} deja de consultar cuando el servidor responde.
+
+
+\subsection{Servicios y barra lateral: caché automática y manual}
+El EXE usa el directorio del perfil local de Windows. La caché de grafos y descargas de OSMnx caduca a los 14 días y tiene una cuota conjunta de 150 MiB. Se eliminan primero los archivos más antiguos. Las búsquedas tienen una vigencia de siete días y se limitan a 250 entradas. El botón Limpiar caché elimina los archivos de red reconocidos y las búsquedas guardadas. Las pruebas comprueban que los archivos ajenos se conservan.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/cache.py}} · versión actual, líneas 19--22.}\par
+\begin{Codigo}[firstnumber=19]
+GRAPH_TTL_S = 14 * 24 * 3600
+GRAPH_CACHE_LIMIT_BYTES = 150 * 1024**2
+_GRAPH_NAME = re.compile(r"(?:osmnx|overpass)_[\w.-]+_.+_[a-f0-9]{12}\.pkl")
+_OSMNX_NAME = re.compile(r"[a-f0-9]{40}\.json")
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{GRAPH\_TTL\_S} es el tiempo de vigencia en segundos y \texttt{GRAPH\_CACHE\_LIMIT\_BYTES} el tamaño máximo entero en bytes. \texttt{**} indica potencia; 1024 al cuadrado convierte MiB a bytes. \texttt{re.compile(patrón)} devuelve una expresión regular compilada. \texttt{\_GRAPH\_NAME} y \texttt{\_OSMNX\_NAME} son patrones para reconocer archivos de caché propios. \texttt{r'...'} conserva las barras invertidas del patrón. \texttt{(?:...)} agrupa alternativas sin capturarlas, \texttt{\textbar{}} separa opciones, \texttt{[...]} describe caracteres posibles, \texttt{+} pide una o más repeticiones y \texttt{\{12\}} o \texttt{\{40\}} una cantidad exacta. \texttt{\textbackslash{}.} pide un punto literal.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/cache.py}} · versión actual, líneas 122--133.}\par
+\begin{Codigo}[firstnumber=122]
+        total = sum(size for _, size, _ in entries)
+        removed = 0
+        for age, size, path in sorted(entries):
+            if age > cutoff and total <= max_bytes:
+                break
+            with suppress(OSError):
+                current = path.lstat()
+                if current.st_mtime == age and current.st_size == size:
+                    path.unlink()
+                    total -= size
+                    removed += 1
+        return removed
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{entries} es una lista de ternas de fecha de modificación, tamaño en bytes y ruta. La expresión generadora \texttt{size for \_, size, \_ in entries} extrae tamaños; \texttt{\_} descarta campos. \texttt{sum(iterable)} devuelve \texttt{total}, el tamaño conjunto. \texttt{removed} cuenta archivos. \texttt{sorted(entries)} devuelve las ternas de más antiguas a más recientes. \texttt{age}, \texttt{size} y \texttt{path} son los tres datos de cada archivo. \texttt{cutoff} es el instante de caducidad y \texttt{max\_bytes} el tope. \texttt{suppress(OSError)} ignora fallos esperables dentro del contexto. \texttt{path.lstat()} devuelve \texttt{current}, los atributos actuales, y permite verificar fecha y tamaño antes de borrar. \texttt{path.unlink()} elimina el archivo y devuelve \texttt{None}. \texttt{-=} resta bytes y \texttt{+=} aumenta el contador. Se devuelve el número eliminado.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/geocoder.py}} · versión actual, líneas 18--19.}\par
+\begin{Codigo}[firstnumber=18]
+TTL_S = 7 * 24 * 3600
+MAX_ENTRIES = 250
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{TTL\_S} es un entero en segundos: siete días multiplicados por horas y segundos por hora. \texttt{MAX\_ENTRIES} es el máximo entero de búsquedas conservadas. Los nombres en mayúsculas señalan constantes por convención. El servicio compara la edad del resultado con el primer valor y cuenta entradas frente al segundo.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 33--48.}\par
+\begin{Codigo}[firstnumber=33]
+@st.cache_data(ttl=3600)
+def _prune_cache(directory: Path) -> int:
+    return GraphCache(directory, enabled=False).prune()
+
+
+@st.fragment(run_every=3600)
+def _cache_controls(directory: Path, user_agent: str) -> None:
+    _prune_cache(directory)
+    if st.button("Limpiar caché"):
+        removed = GraphCache(directory, enabled=False).clear()
+        try:
+            NominatimGeocoder(user_agent).clear_cache()
+        except OSError:
+            st.warning("No se pudo limpiar la caché de lugares.")
+        else:
+            st.success(f"Caché limpiada. Archivos de red eliminados: {removed}.")
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{st.cache\_data(ttl=3600)} crea un decorador que conserva durante una hora el resultado de \texttt{\_prune\_cache(directory)}. \texttt{directory} es un \texttt{Path}. \texttt{GraphCache(directorio, enabled=False)} construye el administrador sin habilitar escrituras normales. \texttt{prune()} retira archivos caducados o fuera de cuota y devuelve el número de archivos retirados. \texttt{st.fragment(run\_every=3600)} permite volver a ejecutar ese fragmento cada hora. \texttt{user\_agent} es el texto identificador para Nominatim. \texttt{st.button(etiqueta)} devuelve si se pulsó el botón. \texttt{clear()} devuelve \texttt{removed}, el número de archivos de red borrados. \texttt{NominatimGeocoder(user\_agent)} crea el servicio de búsqueda y \texttt{clear\_cache()} vacía resultados guardados. \texttt{st.warning(texto)} y \texttt{st.success(texto)} muestran los mensajes correspondientes al fallo o al éxito. \texttt{else} del \texttt{try} indica que se llegó al final sin excepción.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_cache.py}} · versión actual, líneas 61--66.}\par
+\begin{Codigo}[firstnumber=61]
+    assert cache.prune() == 2
+    assert recent.exists()
+    assert unrelated.exists()
+    assert cache.clear() == 1
+    assert not recent.exists()
+    assert unrelated.exists()
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{assert condición} exige que la condición sea verdadera durante la prueba. \texttt{cache} es un \texttt{GraphCache} de prueba, \texttt{recent} la ruta de un archivo reciente de caché y \texttt{unrelated} la de un archivo ajeno. \texttt{prune()} y \texttt{clear()} devuelven números de archivos eliminados. \texttt{Path.exists()} devuelve un booleano. La prueba espera dos borrados por caducidad o cuota, luego un borrado manual y la conservación del archivo ajeno.
+
+
+\section{Documentación y verificación}
+Corregí la línea final del README que mezclaba UTF-16LE con UTF-8 y documenté las funciones nuevas. \texttt{docs/} conserva el diagrama Mermaid. \texttt{pytest} ejecuta pruebas de servicios y algoritmos. \texttt{AppTest} simula interacciones de Streamlit. Ruff valida estilo y formato. El historial registra las mejoras web y el cambio de nombre del VBS. Los cambios de empaquetado y caché estaban en la carpeta de trabajo al redactar este documento. La última suite registrada pasó 65 pruebas y dejó dos pruebas de red excluidas por defecto.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_streamlit_app.py}} · versión actual, líneas 115--123.}\par
+\begin{Codigo}[firstnumber=115]
+        assert not future.done()
+        assert app.session_state["prefetch"][2] is future
+        assert app.session_state["pending_calculation"]
+    finally:
+        release.set()
+    future.result(timeout=5)
+    app.run()
+    assert not app.exception
+    assert app.session_state["route_result"] == result
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{future} es la tarea de preparación. \texttt{future.done()} devuelve si terminó. \texttt{app} es el objeto de AppTest y \texttt{app.session\_state} permite inspeccionar el estado de la interfaz. \texttt{[2]} elige el tercer elemento y \texttt{is} comprueba que sea el mismo objeto. \texttt{release} es un evento de sincronización; \texttt{set()} libera el trabajo de prueba y \texttt{finally} permite hacerlo incluso si falla una aserción. \texttt{future.result(timeout=5)} espera el resultado o lanza un error. \texttt{app.run()} vuelve a ejecutar la interfaz y \texttt{app.exception} permite verificar que no haya excepciones. \texttt{result} es el resultado de ruta esperado.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_planner.py}} · versión actual, líneas 100--103.}\par
+\begin{Codigo}[firstnumber=100]
+    assert attempts == [(0, 4), (0, 2), (3, 4), (1, 2)][: successful_attempt + 1]
+    assert (result.origin_node, result.dest_node) == attempts[-1]
+    assert provider.load_calls == 1
+    assert any("alternativo aplicado" in warning for warning in result.warnings)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{attempts} es la lista de pares de nodos realmente probados. \texttt{successful\_attempt} es el número entero de la prueba parametrizada. El corte \texttt{[:successful\_attempt + 1]} toma los primeros pares previstos. \texttt{result} es la ruta y \texttt{attempts[-1]} su último intento. \texttt{provider} es el proveedor de prueba y \texttt{load\_calls} su contador de cargas, que debe quedar en uno. \texttt{warning} recorre cada cadena de \texttt{result.warnings}. \texttt{any} devuelve si al menos una contiene el texto del ajuste alternativo.
+
+
+\end{document}

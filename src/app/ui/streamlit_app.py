@@ -6,6 +6,7 @@ import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -27,6 +28,24 @@ from app.ui.map_renderer import MapRenderer
 @st.cache_resource
 def _graph_executor() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=1, thread_name_prefix="grafo")
+
+
+@st.cache_data(ttl=3600)
+def _prune_cache(directory: Path) -> int:
+    return GraphCache(directory, enabled=False).prune()
+
+
+@st.fragment(run_every=3600)
+def _cache_controls(directory: Path, user_agent: str) -> None:
+    _prune_cache(directory)
+    if st.button("Limpiar caché"):
+        removed = GraphCache(directory, enabled=False).clear()
+        try:
+            NominatimGeocoder(user_agent).clear_cache()
+        except OSError:
+            st.warning("No se pudo limpiar la caché de lugares.")
+        else:
+            st.success(f"Caché limpiada. Archivos de red eliminados: {removed}.")
 
 
 @st.fragment(run_every=1.0)
@@ -63,7 +82,7 @@ class StreamlitApp:
             "Datos de OpenStreetMap. © OpenStreetMap contributors. "
             "Haz clic en el mapa para marcar origen y destino."
         )
-        settings = self._sidebar()
+        settings = self._advanced_settings()
         self._init_state()
         if "map_view" not in st.session_state:
             fallback = MapView(settings.default_center, min(settings.map_zoom, 19))
@@ -71,10 +90,9 @@ class StreamlitApp:
         self._map_click_panel(settings)
         self._result_panel(settings)
 
-    def _sidebar(self) -> Settings:
+    def _advanced_settings(self) -> Settings:
         settings = self._settings
-        with st.sidebar:
-            st.header("Configuración")
+        with st.popover("Configuración avanzada"):
             provider = st.selectbox(
                 "Backend de datos",
                 options=["osmnx", "overpass"],
@@ -84,6 +102,7 @@ class StreamlitApp:
             profile = st.selectbox(
                 "Perfil",
                 options=["bike", "shortest"],
+                format_func=lambda profile: "Bicicleta" if profile == "bike" else "Más corta",
                 index=0 if settings.profile == "bike" else 1,
                 help="'bike' prioriza vías ciclables; 'shortest' usa solo longitud.",
             )
@@ -108,6 +127,8 @@ class StreamlitApp:
                 step=0.1,
             )
             use_cache = st.checkbox("Usar caché en disco", value=settings.use_cache)
+            _cache_controls(settings.cache_dir, settings.user_agent)
+        with st.popover("ℹ️", help="Información técnica"):
             st.caption(f"User-Agent: `{settings.user_agent}`")
             st.caption(f"Caché: `{settings.cache_dir}`")
 
@@ -141,7 +162,11 @@ class StreamlitApp:
             key="point_mode",
         )
         point_key = "origin" if mode == "Origen" else "dest"
-        self._coordinate_form(mode, point_key)
+        origin_column, dest_column = st.columns(2)
+        with origin_column:
+            self._coordinate_form("Origen", "origin")
+        with dest_column:
+            self._coordinate_form("Destino", "dest")
         self._place_search(settings, mode)
         origin: Coordinate | None = st.session_state["origin"]
         dest: Coordinate | None = st.session_state["dest"]

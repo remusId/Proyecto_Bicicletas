@@ -1,0 +1,313 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+\title{Proyecto Final POO\\Rutas ciclistas sobre OpenStreetMap}
+\author{Explicación técnica e historial de cambios}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+\section*{Cómo leer este documento}
+Los fragmentos son extractos literales del repositorio. La leyenda indica
+el archivo, la versión y el rango de líneas original. Un extracto puede
+empezar dentro de una función y conserva la sangría del archivo. El documento
+incluye el código en su propio archivo \texttt{.tex}.
+
+\section{Fase 1. Arranque, vista, búsqueda y proveedores}
+
+\textbf{Conceptos de esta fase.} CMD es el intérprete de los archivos Batch. El servidor local responde al navegador en la misma computadora. HTTP permite enviar una petición y recibir una respuesta. JSON es texto estructurado con objetos, listas y valores.
+
+La primera entrega debía abrir con doble clic. Después incorporé la persistencia del mapa, la búsqueda por nombres y la recuperación frente a fallos de Overpass.
+
+\subsection{Raíz y scripts: BAT, VBS y arranque local}
+El BAT es un archivo de comandos de Windows. \texttt{\%\string~dp0} localiza la carpeta del lanzador, incluso con espacios. El BAT prepara el entorno si hace falta y arranca Python. Un VBS es un script de VBScript que Windows puede ejecutar mediante \texttt{wscript.exe}. El valor cero en \texttt{shell.Run} oculta la consola. Originalmente se llamó \texttt{lanzar\_silencioso.vbs} y después quedó como \texttt{nereo.vbs}. El lanzador Python busca un puerto, espera al endpoint de salud y abre el navegador. Comprobé ambos lanzadores y el uso de un puerto alternativo cuando 8501 estaba ocupado.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{iniciar_app.bat}} · versión actual, líneas 1--19.}\par
+\begin{Codigo}[firstnumber=1]
+@echo off
+setlocal
+cd /d "%~dp0"
+if /i not "%~1"=="--bootstrap" (
+    wscript.exe "%~dp0nereo.vbs"
+    exit /b
+)
+if not exist ".venv\Scripts\pythonw.exe" (
+    py -3 -m venv .venv || exit /b 1
+)
+if not exist ".venv\rutas-instalado" (
+    ".venv\Scripts\python.exe" -m pip show proyecto-final-poo >nul 2>&1
+    if errorlevel 1 (
+        ".venv\Scripts\python.exe" -m pip install --upgrade pip || exit /b 1
+        ".venv\Scripts\python.exe" -m pip install -e ".[dev]" || exit /b 1
+    )
+    type nul > ".venv\rutas-instalado"
+)
+start "" ".venv\Scripts\pythonw.exe" "%~dp0scripts\lanzar_app.py"
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} Este bloque pertenece a CMD/Batch de Windows. \texttt{@echo off} deja de mostrar los comandos y \texttt{@} oculta esa misma instrucción. \texttt{setlocal} limita al script los cambios de entorno. \texttt{cd /d} cambia de unidad y carpeta; \texttt{\%\textasciitilde{}dp0} extrae unidad y carpeta del archivo Batch y \texttt{\%\textasciitilde{}1} obtiene el primer argumento sin comillas externas. Las comillas protegen rutas con espacios. \texttt{if /i} compara sin distinguir mayúsculas, \texttt{not} invierte la condición y los paréntesis agrupan comandos. \texttt{wscript.exe} ejecuta el VBS. \texttt{exit /b} sale del Batch y el código \texttt{1} indica fallo. \texttt{if not exist} comprueba archivos; \texttt{py -3 -m venv .venv} selecciona Python 3 y crea el entorno. \texttt{\textbar{}\textbar{}} ejecuta la orden derecha si falla la izquierda. \texttt{-m pip} ejecuta el instalador de paquetes: \texttt{show} consulta la instalación, \texttt{install --upgrade pip} actualiza pip y \texttt{install -e ".[dev]"} instala el proyecto editable con extras de desarrollo. \texttt{\textgreater{}nul} descarta la salida normal y \texttt{2\textgreater{}\&1} redirige errores al mismo destino. \texttt{if errorlevel 1} comprueba un código de al menos 1. \texttt{type nul \textgreater{} archivo} crea el marcador vacío de instalación. \texttt{start "" ...} ejecuta otro programa; la cadena vacía reserva el título de la ventana y \texttt{pythonw.exe} inicia el script sin una consola permanente.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{nereo.vbs}} · versión actual, líneas 1--10.}\par
+\begin{Codigo}[firstnumber=1]
+Option Explicit
+Dim shell, files, root, command, result
+Set shell = CreateObject("WScript.Shell")
+Set files = CreateObject("Scripting.FileSystemObject")
+root = files.GetParentFolderName(WScript.ScriptFullName)
+command = "cmd.exe /d /c " & Chr(34) & Chr(34) & root & "\iniciar_app.bat" & Chr(34) & " --bootstrap" & Chr(34)
+result = shell.Run(command, 0, True)
+If result <> 0 Then
+    MsgBox "No se pudo preparar la aplicación. Comprueba que Python 3.11 o superior y el lanzador py estén instalados y que tengas conexión a Internet.", 16, "Rutas ciclistas"
+End If
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} VBScript es otro lenguaje de Windows. \texttt{Option Explicit} obliga a declarar variables y \texttt{Dim} hace esas declaraciones. \texttt{Set} asigna objetos. \texttt{CreateObject(nombre)} devuelve un objeto de automatización: \texttt{shell} ejecuta comandos y \texttt{files} maneja rutas. \texttt{WScript.ScriptFullName} es la ruta del VBS; \texttt{GetParentFolderName(ruta)} devuelve \texttt{root}, su carpeta. \texttt{Chr(34)} devuelve una comilla y \texttt{\&} concatena texto para construir \texttt{command}. En CMD, \texttt{cmd.exe /d /c} evita la ejecución automática configurada del intérprete y ejecuta el comando indicado. \texttt{shell.Run(command, 0, True)} ejecuta el Batch con ventana oculta y espera su código entero \texttt{result}. \texttt{\textless{}\textgreater{}} compara desigualdad. \texttt{MsgBox(texto, 16, título)} muestra un cuadro de error y devuelve qué botón se pulsó, valor que aquí se descarta.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/lanzar_app.py}} · versión actual, líneas 18--26.}\par
+\begin{Codigo}[firstnumber=18]
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", 8501))
+            except OSError:
+                sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+
+        url = f"http://127.0.0.1:{port}"
+        log = root / ".venv" / "lanzador.log"
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{socket.socket()} devuelve un socket, un objeto para comunicación de red. \texttt{with} garantiza su cierre. \texttt{sock} es ese objeto. \texttt{bind((dirección, puerto))} reserva el puerto local y devuelve \texttt{None}; \texttt{127.0.0.1} identifica esta misma máquina. Si 8501 no está disponible, \texttt{OSError} activa el intento con cero, que pide al sistema elegir el puerto. \texttt{getsockname()} devuelve dirección y puerto; \texttt{[1]} guarda el entero en \texttt{port}. \texttt{url} es texto construido con una f-string. \texttt{root} es la ruta base y \texttt{log} la ruta del registro. \texttt{/} entre un \texttt{Path} y texto agrega un segmento de ruta.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/lanzar_app.py}} · versión actual, líneas 51--65.}\par
+\begin{Codigo}[firstnumber=51]
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline and process.poll() is None:
+            try:
+                with urlopen(f"{url}/_stcore/health", timeout=1) as response:
+                    if response.read().strip() == b"ok" and process.poll() is None:
+                        if not webbrowser.open(url):
+                            ctypes.windll.user32.MessageBoxW(
+                                0, f"Abre {url} en tu navegador.", "Rutas ciclistas", 0
+                            )
+                        return
+            except (URLError, TimeoutError):
+                time.sleep(0.25)
+        raise RuntimeError(f"Revisa el registro {log} e inténtalo de nuevo.")
+    except (OSError, RuntimeError) as exc:
+        if process is not None and process.poll() is None:
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{deadline} es un número de segundos en el reloj monotónico; \texttt{time.monotonic()} devuelve ese reloj, que no salta por cambios en la hora del sistema. \texttt{process} representa el proceso local y \texttt{poll()} devuelve \texttt{None} mientras sigue corriendo o un entero al terminar. \texttt{urlopen(URL, timeout=1)} abre la respuesta HTTP con un límite de espera; \texttt{response.read()} devuelve bytes y \texttt{strip()} quita espacios exteriores. El prefijo \texttt{b} crea bytes, por eso se compara con \texttt{b'ok'}. \texttt{webbrowser.open(url)} solicita abrir el navegador y devuelve un booleano. \texttt{ctypes.windll.user32.MessageBoxW(ventana, texto, título, opciones)} llama a Windows y devuelve el botón pulsado. \texttt{time.sleep(segundos)} pausa y devuelve \texttt{None}; aquí reintenta después de un cuarto de segundo si ocurre \texttt{URLError} o \texttt{TimeoutError}. \texttt{RuntimeError} lleva el mensaje con la ruta \texttt{log} cuando se agota la espera. El \texttt{exc} del bloque exterior representa el error capturado.
+
+
+\subsection{Servicios e interfaces: persistencia y búsqueda por nombre}
+El estado de la vista se guarda en JSON en el perfil del usuario. Los valores inválidos recuperan la vista predeterminada, que inicialmente es Madrid. Nominatim transforma textos en coordenadas. El servicio usa \texttt{requests}, limita y serializa peticiones y guarda los resultados durante siete días. La CLI incorporó \texttt{--geocode}, \texttt{--origin-place} y \texttt{--dest-place}. En la web se puede elegir un resultado y fijarlo como origen o destino. La búsqueda real de Plaza Norte entregó una coordenada a unos 6 m de la referencia.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/ui_state.py}} · versión actual, líneas 37--52.}\par
+\begin{Codigo}[firstnumber=37]
+    def __init__(self, path: Path | None = None) -> None:
+        local = os.getenv("LOCALAPPDATA")
+        default = (
+            Path(local) / "RutasCiclistas" if local else Path.home() / ".config/rutas-ciclistas"
+        )
+        self.path = path or Path(os.getenv("APP_UI_STATE", str(default / "ui_state.json")))
+
+    def load(self, fallback: MapView) -> MapView:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return MapView(Coordinate(data["lat"], data["lon"]), data["zoom"])
+        except (OSError, ValueError, TypeError, KeyError):
+            return fallback
+
+    def save(self, view: MapView) -> None:
+        write_json(self.path, {"lat": view.center.lat, "lon": view.center.lon, "zoom": view.zoom})
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{path} es una ruta \texttt{Path} opcional. \texttt{os.getenv(nombre, valor\_opcional)} lee variables de entorno y devuelve texto o \texttt{None}. \texttt{local} contiene el perfil local, \texttt{Path.home()} devuelve la carpeta del usuario y \texttt{default} es la ruta de datos elegida. \texttt{str(ruta)} la convierte a texto y \texttt{path or ...} usa la segunda opción si falta la primera. \texttt{self.path} queda como ruta del JSON. \texttt{fallback} es la vista segura que se devuelve si el archivo falta o contiene datos inválidos. \texttt{read\_text(encoding=...)} devuelve texto y \texttt{json.loads(texto)} lo transforma en \texttt{data}, un diccionario esperado. \texttt{Coordinate(latitud, longitud)} valida ambos números. \texttt{MapView(coordenada, zoom)} devuelve la vista restaurada. \texttt{save(view)} recibe una vista y prepara un diccionario con coordenadas y un zoom entero. \texttt{write\_json(ruta, datos)} escribe el JSON de forma atómica y devuelve \texttt{None}.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/geocoder.py}} · versión actual, líneas 85--96.}\par
+\begin{Codigo}[firstnumber=85]
+                last = data.get("last")
+                if isinstance(last, (int, float)) and 0 <= now - last < 1:
+                    time.sleep(1 - (now - last))
+                data = {"last": time.time(), "entries": entries}
+                write_json(self._path, data)
+                payload = self._request(query)
+                results = self._parse(payload)
+                entries[key] = {"at": time.time(), "results": payload}
+                if len(entries) > MAX_ENTRIES:
+                    oldest = min(entries, key=lambda name: float(entries[name]["at"]))
+                    del entries[oldest]
+                write_json(self._path, data)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{data} y \texttt{entries} son diccionarios de control y resultados. \texttt{last} es una marca de tiempo numérica o ausente; \texttt{now} es el tiempo actual en segundos. \texttt{isinstance(valor, (int, float))} devuelve si el tipo coincide con alguno de esos tipos. La comparación encadenada comprueba si ha pasado menos de un segundo y \texttt{time.sleep(resto)} espera. \texttt{time.time()} devuelve segundos desde la época Unix. \texttt{write\_json(ruta, datos)} persiste el registro. \texttt{query} es el texto buscado, \texttt{\_request(query)} devuelve el contenido de la respuesta y \texttt{\_parse(payload)} lo convierte en \texttt{results}, una tupla de lugares. \texttt{key} es la clave de búsqueda y \texttt{\_path} es la ruta del archivo. \texttt{len(entries)} cuenta entradas y \texttt{MAX\_ENTRIES} es el tope entero. \texttt{min(entries, key=...)} devuelve la clave más antigua según la función \texttt{lambda name: ...}, que toma una clave y devuelve su fecha como decimal. \texttt{del entries[oldest]} elimina esa entrada.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/geocoder.py}} · versión actual, líneas 121--128.}\par
+\begin{Codigo}[firstnumber=121]
+            response = requests.get(
+                self._url,
+                params={"q": query, "format": "jsonv2", "limit": 5, "accept-language": "es"},
+                headers={"User-Agent": self._user_agent},
+                timeout=8,
+            )
+        except requests.RequestException as exc:
+            raise ProviderUnavailableError(
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{requests} es una biblioteca para HTTP. \texttt{requests.get(url, params=..., headers=..., timeout=8)} devuelve \texttt{response}, la respuesta del servidor, o lanza \texttt{requests.RequestException}. \texttt{\_url} y \texttt{\_user\_agent} son cadenas. \texttt{query} se envía como parámetro \texttt{q}, \texttt{format} selecciona el formato JSON, \texttt{limit} limita los resultados y \texttt{accept-language} pide nombres en español. \texttt{headers} envía un identificador de cliente. El \texttt{timeout} limita la espera de red de la operación. \texttt{exc} es el error original; \texttt{ProviderUnavailableError} permite informar del fallo en términos de la aplicación.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/cli.py}} · versión actual, líneas 50--61.}\par
+\begin{Codigo}[firstnumber=50]
+            if args.geocode is not None:
+                if any((args.origin, args.dest, args.origin_place, args.dest_place)):
+                    raise ValueError("--geocode se usa sin argumentos de origen y destino.")
+                places = geocoder.search(args.geocode)
+                if not places:
+                    raise ValueError("No se encontraron lugares. Añade la ciudad o el distrito.")
+                for place in places:
+                    print(f"{place.name} ({place.latlon})")
+                print("Datos: © OpenStreetMap contributors")
+                print(places[0].latlon)
+                return 0
+            if not (args.origin or args.origin_place) or not (args.dest or args.dest_place):
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{args} contiene las opciones analizadas por \texttt{argparse}: los nombres de los puntos y \texttt{geocode} son cadenas opcionales. \texttt{any(iterable)} devuelve si algún valor cuenta como verdadero. \texttt{geocoder.search(texto)} devuelve \texttt{places}, una tupla de objetos \texttt{Place}. Cada \texttt{place} tiene \texttt{name} y \texttt{latlon}, ambos textos; \texttt{latlon} está listo para reutilizarse en la CLI. \texttt{print(texto)} escribe una línea y devuelve \texttt{None}. \texttt{places[0]} elige el primer resultado. \texttt{return 0} comunica éxito al sistema. La condición final comprueba que se indicó origen y destino, sea por nombre o por coordenadas.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/streamlit_app.py}} · versión actual, líneas 303--305.}\par
+\begin{Codigo}[firstnumber=303]
+            if selected is not None and st.button(f"Usar como {mode.lower()}"):
+                self._set_point("origin" if mode == "Origen" else "dest", selected.coordinate)
+                self._recenter(selected.coordinate)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{selected} es un \texttt{Place} o \texttt{None}; \texttt{mode} es el texto Origen o Destino. \texttt{mode.lower()} devuelve una copia en minúsculas. \texttt{st} es el alias de Streamlit. \texttt{st.button(etiqueta)} devuelve si se pulsó el botón. \texttt{and} evita crear ese botón en esta rama si no hay selección. La expresión \texttt{A if condición else B} escoge una clave de texto. \texttt{\_set\_point(clave, coordenada)} guarda ese extremo y borra el resultado anterior. \texttt{\_recenter(coordenada)} actualiza la vista del mapa. Ambos métodos devuelven \texttt{None}.
+
+
+\subsection{Proveedores: reintentos secuenciales}
+El proveedor directo pasó a probar servidores en orden. Usa un presupuesto total, demoras crecientes y \texttt{Retry-After} cuando corresponde. El mensaje final aporta los servidores e intentos. Probé el paso al siguiente servidor con HTTP 502 simulado. El dominio antiguo de Kumi agotó el tiempo en la prueba real y la consulta corta funcionó usando los espejos configurados después.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/overpass_provider.py}} · versión actual, líneas 312--367.}\par
+\begin{Codigo}[firstnumber=312]
+    def _request(self, query: str) -> dict[str, Any]:
+        deadline = time.monotonic() + self._deadline_s
+        tried = []
+        total = 0
+        for index, url in enumerate(self._urls):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            endpoint_deadline = time.monotonic() + remaining / (len(self._urls) - index)
+            attempts = 0
+            retryable = True
+            for attempt in range(1, self._retries + 1):
+                remaining = endpoint_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                attempts += 1
+                retry_after = None
+                try:
+                    response = self._session.post(
+                        url, data={"data": query}, timeout=min(self._timeout_s, remaining)
+                    )
+                except requests.Timeout:
+                    last_error = "timeout"
+                except requests.RequestException:
+                    last_error = "error de conexión"
+                else:
+                    status = response.status_code
+                    if status == 200:
+                        return self._decode(response)
+                    last_error = f"HTTP {status}"
+                    if status != 429 and not 500 <= status < 600:
+                        retryable = False
+                        break
+                    retry_after = response.headers.get("Retry-After")
+                    if status == 429 and retry_after is None:
+                        retry_after = "30"
+                if attempt < self._retries:
+                    delay = self._retry_delay(attempt, retry_after)
+                    if delay >= endpoint_deadline - time.monotonic():
+                        break
+                    time.sleep(delay)
+            if attempts:
+                total += attempts
+                try:
+                    host = urlsplit(url).hostname or "servidor sin nombre"
+                except ValueError:
+                    host = "URL inválida"
+                tried.append(f"{host} ({attempts}, {last_error})")
+            if not retryable:
+                break
+        raise ProviderUnavailableError(
+            f"Overpass no está disponible tras {total} intentos. "
+            f"Servidores probados: {', '.join(tried) or 'ninguno'}. "
+            "Reintenta en unos minutos, elige OSMnx (--provider osmnx) "
+            "o define OVERPASS_URL para usar otro servidor."
+        )
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{query} es la consulta de texto y el retorno \texttt{dict[str, Any]} es el JSON interpretado como diccionario. \texttt{deadline} y \texttt{endpoint\_deadline} son instantes en el reloj \texttt{time.monotonic()}. \texttt{remaining} expresa segundos disponibles. \texttt{\_urls} es la secuencia de servidores. \texttt{enumerate(secuencia)} entrega pares de índice entero \texttt{index} y URL \texttt{url}; \texttt{len} cuenta servidores y \texttt{range(1, \_retries + 1)} genera números de intento con final excluido. \texttt{tried} es una lista de descripciones y \texttt{total} y \texttt{attempts} son contadores. \texttt{+= 1} incrementa y \texttt{break} detiene el bucle. \texttt{retryable} es booleano, \texttt{retry\_after} texto o \texttt{None}. \texttt{self.\_session.post(URL, data=..., timeout=...)} envía el formulario y devuelve una respuesta; \texttt{min} limita el plazo de la petición. \texttt{requests.Timeout} y \texttt{RequestException} son tipos de error. \texttt{else} del \texttt{try} se ejecuta si no hubo excepción. \texttt{status} es el código HTTP; \texttt{\_decode(response)} devuelve el diccionario si el código es 200. \texttt{last\_error} es texto. \texttt{response.headers.get(nombre)} devuelve una cabecera opcional. \texttt{\_retry\_delay(intento, cabecera)} devuelve segundos de espera como número y \texttt{time.sleep} los espera. \texttt{urlsplit(url)} devuelve la URL descompuesta y \texttt{hostname} obtiene \texttt{host}, texto para el diagnóstico. \texttt{append(texto)} agrega a la lista y \texttt{', '.join(tried)} une las descripciones. La f-string inserta contadores y errores. Si la secuencia falla se lanza \texttt{ProviderUnavailableError}.
+
+
+\end{document}

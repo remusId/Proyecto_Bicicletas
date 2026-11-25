@@ -1,0 +1,517 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+\title{Proyecto Final POO\\Rutas ciclistas sobre OpenStreetMap}
+\author{Explicación técnica e historial de cambios}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+\section*{Cómo leer este documento}
+Los fragmentos son extractos literales del repositorio. La leyenda indica
+el archivo, la versión y el rango de líneas original. Un extracto puede
+empezar dentro de una función y conserva la sangría del archivo. El documento
+incluye el código en su propio archivo \texttt{.tex}.
+
+\section{Fase 0. El proyecto que recibí}
+
+\textbf{Conceptos de esta fase.} Un módulo es un archivo Python y un paquete agrupa módulos. Un método es una función asociada a una clase u objeto. La sangría delimita los bloques. \texttt{None} indica ausencia y las anotaciones de tipo documentan los valores esperados.
+
+El primer commit, \texttt{0307084} (\texttt{Hola}), ya era una aplicación funcional. El usuario elegía dos coordenadas. La app descargaba calles y caminos de OpenStreetMap, ajustaba los puntos a la red, ejecutaba un A* propio y mostraba el resultado en la terminal, en Streamlit o en un PNG. El informe inicial registró 50 pruebas aprobadas y una de red excluida por defecto.
+
+\subsection{Raíz, configuración y entrada}
+\texttt{pyproject.toml} declaraba Python 3.11 o superior, las dependencias y las herramientas de desarrollo. El entorno local \texttt{.venv} aislaba las bibliotecas. \texttt{.git} conservaba el historial y \texttt{.gitignore} excluía datos generados. También había un README, mapas PNG, archivos de caché y registros de Streamlit. El punto de entrada delegaba en la CLI y propagaba su código de salida.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/__main__.py}} · commit inicial 0307084, líneas 1--8.}\par
+\begin{Codigo}[firstnumber=1]
+"""Entrada para ``python -m app``."""
+
+from __future__ import annotations
+
+from app.ui.cli import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{python -m app} le dice al intérprete de Python que ejecute el paquete \texttt{app}. Un paquete agrupa módulos, que normalmente son archivos \texttt{.py}. Python busca \texttt{app/\_\_main\_\_.py} como entrada. \texttt{from X import Y} carga el nombre \texttt{Y} desde el módulo \texttt{X}. \texttt{\_\_future\_\_} es un módulo incluido en Python que habilita comportamientos del lenguaje. \texttt{annotations} difiere la evaluación inmediata de anotaciones de tipo en las versiones aplicables. \texttt{app.ui.cli} designa el archivo \texttt{src/app/ui/cli.py}: \texttt{app} es el paquete, \texttt{ui} el subpaquete de interfaces y \texttt{cli} el módulo de terminal. \texttt{main()} acepta opcionalmente una secuencia de argumentos y devuelve un entero. \texttt{\_\_name\_\_} es una cadena asignada por Python a cada módulo. Vale \texttt{\_\_main\_\_} al ejecutar la entrada. \texttt{==} compara los valores. \texttt{raise SystemExit(main())} termina la ejecución con el entero devuelto por \texttt{main}: por convención, cero indica éxito. Las comillas triples del comienzo delimitan la documentación del módulo.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{pyproject.toml}} · commit inicial 0307084, líneas 6--22.}\par
+\begin{Codigo}[firstnumber=6]
+name = "proyecto-final-poo"
+version = "0.1.0"
+description = "Rutas ciclistas con A* propio sobre datos de OpenStreetMap"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "osmnx>=2.0.0",
+    "networkx>=3.2",
+    "requests>=2.31",
+    "folium>=0.16",
+    "streamlit>=1.38",
+    "streamlit-folium>=0.22",
+    "scipy>=1.13",
+]
+
+[project.optional-dependencies]
+dev = [
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} Este bloque usa TOML, un formato de configuración. Las claves a la izquierda de \texttt{=} tienen valores a la derecha. \texttt{name}, \texttt{version}, \texttt{description} y \texttt{readme} son cadenas de metadatos. \texttt{requires-python} fija la versión mínima. \texttt{dependencies} es una lista de requisitos. \texttt{\textgreater{}=} dentro de cada cadena indica una versión mínima permitida. OSMnx obtiene y prepara redes de OpenStreetMap. NetworkX representa grafos. Requests hace peticiones HTTP. Folium construye mapas web. Streamlit crea la interfaz local y \texttt{streamlit-folium} integra el mapa. SciPy aporta herramientas numéricas, entre ellas la búsqueda de puntos cercanos. \texttt{[project.optional-dependencies]} abre una tabla y \texttt{dev} comienza la lista del extra de desarrollo.
+
+
+\subsection{Dominio: coordenadas, área y resultado}
+Las coordenadas se validan para evitar latitudes, longitudes y números inválidos. El rectángulo de descarga incluye los dos puntos y un margen convertido de metros a grados. \texttt{RouteResult} reúne distancia, duración, nodos, geometría y métricas. La jerarquía de excepciones permite informar por separado de fallos de red, cobertura y rutas.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/models.py}} · commit inicial 0307084, líneas 30--54.}\par
+\begin{Codigo}[firstnumber=30]
+    def __post_init__(self) -> None:
+        try:
+            lat = float(self.lat)
+            lon = float(self.lon)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("La latitud y la longitud deben ser numéricas.") from exc
+        if not isfinite(lat) or not isfinite(lon):
+            raise ValueError("La latitud y la longitud deben ser finitas.")
+        if not -90.0 <= lat <= 90.0:
+            raise ValueError("La latitud debe estar entre -90 y 90.")
+        if not -180.0 <= lon <= 180.0:
+            raise ValueError("La longitud debe estar entre -180 y 180.")
+        object.__setattr__(self, "lat", lat)
+        object.__setattr__(self, "lon", lon)
+
+    @classmethod
+    def from_string(cls, value: str) -> Coordinate:
+        """Convierte ``"lat,lon"`` en una coordenada validada."""
+        parts = [part.strip() for part in value.split(",")]
+        if len(parts) != 2:
+            raise ValueError("El formato debe ser LAT,LON (por ejemplo 40.4168,-3.7038).")
+        try:
+            return cls(float(parts[0]), float(parts[1]))
+        except ValueError as exc:
+            raise ValueError("Las coordenadas deben ser números separados por una coma.") from exc
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{def} declara una función. \texttt{self} representa la coordenada actual y \texttt{-\textgreater{} None} indica que el método no devuelve un valor útil. \texttt{\_\_post\_init\_\_} se invoca después de inicializar el objeto. \texttt{float(valor)} produce un número decimal de punto flotante o lanza \texttt{TypeError} o \texttt{ValueError}. \texttt{lat} y \texttt{lon} son los valores convertidos. \texttt{try} ejecuta el bloque y \texttt{except (A, B) as exc} captura cualquiera de esos errores y lo asocia al objeto \texttt{exc}. \texttt{raise ... from exc} conserva su causa. \texttt{isfinite(número)} devuelve un booleano y rechaza infinitos y NaN. \texttt{not} niega y \texttt{or} acepta que se cumpla cualquiera de las condiciones. Las comparaciones encadenadas validan límites inclusivos. \texttt{object.\_\_setattr\_\_(objeto, nombre, valor)} fija el atributo incluso en la fase de inicialización de este objeto inmutable. \texttt{@classmethod} es un decorador que entrega la clase en \texttt{cls}. \texttt{value: str} es texto y \texttt{-\textgreater{} Coordinate} indica qué objeto se devuelve. \texttt{value.split(',')} devuelve una lista de partes. \texttt{strip()} devuelve cada parte sin espacios exteriores. La comprensión crea \texttt{parts}, una lista de cadenas, y \texttt{part} es cada elemento. \texttt{len(parts)} devuelve su tamaño. \texttt{!=} comprueba desigualdad y los índices \texttt{[0]} y \texttt{[1]} recuperan las dos partes. \texttt{cls(latitud, longitud)} construye la coordenada que luego se valida.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/models.py}} · commit inicial 0307084, líneas 93--109.}\par
+\begin{Codigo}[firstnumber=93]
+
+        min_lat = min(first.lat, second.lat)
+        max_lat = max(first.lat, second.lat)
+        min_lon = min(first.lon, second.lon)
+        max_lon = max(first.lon, second.lon)
+
+        mid_lat = radians((min_lat + max_lat) / 2.0)
+        lat_pad = degrees(margin_m / EARTH_RADIUS_M)
+        lon_pad = degrees(margin_m / (EARTH_RADIUS_M * max(cos(mid_lat), 1e-6)))
+
+        south = max(-90.0, min_lat - lat_pad)
+        north = min(90.0, max_lat + lat_pad)
+        west = min_lon - lon_pad
+        east = max_lon + lon_pad
+        if west < -180.0 or east > 180.0:
+            raise ValueError("El área cruza el meridiano 180; elige puntos más cercanos.")
+        return cls(south=south, west=west, north=north, east=east)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{first} y \texttt{second} son objetos \texttt{Coordinate}. Sus campos dan latitud y longitud en grados. \texttt{min(a, b)} y \texttt{max(a, b)} devuelven el menor y el mayor, respectivamente. \texttt{min\_lat}, \texttt{max\_lat}, \texttt{min\_lon} y \texttt{max\_lon} son los cuatro extremos iniciales, de tipo \texttt{float}. \texttt{mid\_lat} es la latitud media en radianes. \texttt{radians(grados)} y \texttt{degrees(radianes)} devuelven el ángulo en la unidad opuesta. \texttt{cos(radianes)} calcula el coseno. \texttt{margin\_m} y \texttt{EARTH\_RADIUS\_M} son distancias en metros. \texttt{lat\_pad} y \texttt{lon\_pad} son márgenes en grados. El mínimo \texttt{1e-6} vale una millonésima y evita dividir entre cero cerca de los polos. \texttt{south}, \texttt{north}, \texttt{west} y \texttt{east} son los límites finales. \texttt{max} y \texttt{min} acotan las latitudes. Si se cruza el meridiano 180 se lanza \texttt{ValueError}. \texttt{cls(south=..., west=..., north=..., east=...)} llama al constructor del rectángulo con argumentos nombrados y devuelve el objeto.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/models.py}} · commit inicial 0307084, líneas 150--173.}\par
+\begin{Codigo}[firstnumber=150]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RouteResult:
+    """Resultado inmutable de una planificación de ruta."""
+
+    nodes: tuple[NodeId, ...]
+    distance_m: float
+    duration_s: float
+    nodes_expanded: int
+    backend: str
+    profile: str
+    algorithm: str
+    snap_origin_m: float
+    snap_dest_m: float
+    geometry: tuple[Coordinate, ...] = ()
+    warnings: tuple[str, ...] = ()
+    bbox: BoundingBox | None = None
+    weighted_cost: float | None = None
+    compute_time_s: float = 0.0
+    graph: Any = None
+    origin_node: NodeId | None = None
+    dest_node: NodeId | None = None
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{@dataclass} es un decorador de la biblioteca estándar que genera métodos a partir de campos anotados. \texttt{frozen=True} bloquea reasignaciones ordinarias y \texttt{slots=True} fija la estructura de atributos. \texttt{nodes} es una tupla de identificadores \texttt{NodeId}, que pueden ser enteros o cadenas. \texttt{distance\_m}, \texttt{duration\_s} y \texttt{compute\_time\_s} son decimales en metros y segundos. \texttt{nodes\_expanded} es un contador entero. \texttt{backend}, \texttt{profile} y \texttt{algorithm} son etiquetas de texto. \texttt{snap\_origin\_m} y \texttt{snap\_dest\_m} son distancias de ajuste en metros. \texttt{geometry} reúne coordenadas y \texttt{warnings} reúne mensajes. \texttt{tuple[T, ...]} indica una cantidad variable de elementos de tipo \texttt{T}, y \texttt{()} es la tupla vacía. \texttt{bbox} puede ser un rectángulo o \texttt{None}. \texttt{weighted\_cost} puede estar ausente. \texttt{graph: Any} admite el grafo u otro valor, con \texttt{None} inicial. \texttt{origin\_node} y \texttt{dest\_node} son identificadores opcionales. En estas anotaciones \texttt{\textbar{}} indica una alternativa de tipos. Después de \texttt{=} se muestran valores iniciales.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/domain/exceptions.py}} · commit inicial 0307084, líneas 6--23.}\par
+\begin{Codigo}[firstnumber=6]
+class RoutingError(Exception):
+    """Error base de la aplicación de rutas."""
+
+
+class NoRouteFoundError(RoutingError):
+    """No existe un camino entre el origen y el destino."""
+
+
+class AreaTooLargeError(RoutingError):
+    """El área solicitada supera el límite configurado."""
+
+
+class ProviderUnavailableError(RoutingError):
+    """El proveedor de datos no está disponible o devolvió datos inválidos."""
+
+
+class SnapDistanceError(RoutingError):
+    """Un punto está demasiado lejos de la red ciclable."""
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{class} declara una clase. Los paréntesis indican herencia: \texttt{RoutingError} hereda de \texttt{Exception}, la clase estándar de errores ordinarios. Las clases especializadas heredan de \texttt{RoutingError}; por ello una interfaz puede capturarlas juntas o por separado. Se construyen con un mensaje opcional y producen un objeto de excepción que \texttt{raise} puede lanzar. Los textos entre comillas triples describen el significado de cada clase.
+
+
+\subsection{Proveedores: OSMnx y Overpass directo}
+Ambos se alimentan de OpenStreetMap. OSMnx filtra la red para bicicleta, simplifica el grafo y conserva la componente principal. Proyecta el grafo y preserva latitud y longitud. El proveedor directo consulta Overpass, interpreta las etiquetas y construye un grafo de NetworkX con aristas dirigidas. Conserva varias componentes. La excepción \texttt{oneway:bicycle=no} permite recorrer en ambos sentidos una vía de un solo sentido para otros vehículos.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/osmnx_provider.py}} · commit inicial 0307084, líneas 130--135.}\par
+\begin{Codigo}[firstnumber=130]
+                return ox.graph_from_bbox(
+                    bbox.to_osmnx_tuple(),
+                    network_type=self._network_type,
+                    simplify=True,
+                    retain_all=False,
+                )
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{ox} es el alias de OSMnx, una biblioteca que prepara redes geográficas. \texttt{bbox} es el rectángulo de descarga. Su método \texttt{to\_osmnx\_tuple()} devuelve los límites en el orden oeste, sur, este y norte. \texttt{self.\_network\_type} es una cadena, aquí \texttt{bike}. \texttt{ox.graph\_from\_bbox(rectángulo, network\_type=..., simplify=..., retain\_all=...)} obtiene y devuelve un \texttt{MultiDiGraph}. \texttt{simplify=True} simplifica la topología y \texttt{retain\_all=False} conserva la componente principal. \texttt{True} y \texttt{False} son booleanos. Los argumentos con nombre indican a qué opción corresponde cada valor.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/overpass_provider.py}} · commit inicial 0307084, líneas 51--61.}\par
+\begin{Codigo}[firstnumber=51]
+def _way_directions(tags: Mapping[str, Any]) -> tuple[bool, bool]:
+    """Devuelve ``(forward, backward)`` respetando oneway y oneway:bicycle."""
+    oneway = _tag_text(tags.get("oneway"))
+    bicycle_oneway = _tag_text(tags.get("oneway:bicycle"))
+    if bicycle_oneway in {"no", "false", "0"}:
+        return True, True
+    if oneway == "-1":
+        return False, True
+    if oneway in {"yes", "true", "1"}:
+        return True, False
+    return True, True
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{tags} se anota \texttt{Mapping[str, Any]}: una colección de claves de texto con valores de tipo abierto. \texttt{tags.get(clave)} devuelve el valor o \texttt{None}. \texttt{\_tag\_text(valor)} devuelve una cadena normalizada, útil porque las etiquetas pueden llegar con distintas representaciones. \texttt{oneway} y \texttt{bicycle\_oneway} son esas cadenas. \texttt{\{...\}} crea un conjunto en este caso. \texttt{in} comprueba pertenencia y \texttt{==} compara igualdad. Cada \texttt{return} devuelve el par ordenado \texttt{(adelante, atrás)} de booleanos. La excepción para bicicletas se evalúa antes que el sentido general.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/providers/overpass_provider.py}} · commit inicial 0307084, líneas 140--145.}\par
+\begin{Codigo}[firstnumber=140]
+            if forward:
+                graph.add_edge(source, target, key=f"{way_id}:{index}:f", **data)
+            if backward:
+                reverse_data = dict(data)
+                reverse_data["reversed"] = True
+                graph.add_edge(target, source, key=f"{way_id}:{index}:r", **reverse_data)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{graph} es un \texttt{MultiDiGraph} de NetworkX. \texttt{source} y \texttt{target} son identificadores de nodos; \texttt{way\_id} identifica la vía y \texttt{index} es el número entero del tramo. \texttt{forward} y \texttt{backward} indican si está permitido cada sentido. \texttt{data} es un diccionario de atributos de la arista. \texttt{graph.add\_edge(origen, destino, key=..., **atributos)} añade una arista dirigida; su clave identifica esa arista. \texttt{**data} expande cada par clave-valor como argumento nombrado. Las f-strings, iniciadas con \texttt{f}, evalúan lo que está entre llaves. \texttt{dict(data)} devuelve una copia superficial, \texttt{reverse\_data}, para marcar el sentido inverso sin editar el diccionario original. La asignación con \texttt{[clave]} crea o cambia ese atributo.
+
+
+\subsection{Ruteo: A*, Dijkstra y perfiles}
+A* extrae el nodo de menor prioridad con \texttt{heapq}. La prioridad suma el coste recorrido y una estimación geográfica haversine. La cola solo se actualiza cuando aparece un coste mejor. Dijkstra reutiliza el motor con estimación cero, lo que permite comparar resultados. \texttt{shortest} usa la longitud. \texttt{bike} multiplica la longitud por un factor según la clase de calle. Ambos aplican restricciones de acceso y recorren los sentidos del grafo. Una ciclovía de 120 m puede ganar frente a una avenida principal de 100 m en \texttt{bike}, porque sus costes serían 120 y 155. El proyecto considera las conexiones registradas y carece de tráfico en vivo y de un coste por pendiente.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/astar.py}} · commit inicial 0307084, líneas 58--78.}\par
+\begin{Codigo}[firstnumber=58]
+        expanded = 0
+
+        while open_heap:
+            _, _, current = heapq.heappop(open_heap)
+            if current in closed:
+                continue
+            closed.add(current)
+            expanded += 1
+            if current == dest:
+                break
+
+            for neighbor, edge_data in self._out_edges(current):
+                edge_cost = profile.edge_cost(edge_data)
+                if not math.isfinite(edge_cost) or edge_cost < 0.0:
+                    continue
+                tentative = g_score[current] + edge_cost
+                if tentative < g_score.get(neighbor, math.inf):
+                    g_score[neighbor] = tentative
+                    came_from[neighbor] = (current, edge_data)
+                    priority = tentative + self._heuristic(neighbor, destination, scale)
+                    heapq.heappush(open_heap, (priority, next(counter), neighbor))
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{open\_heap} es una lista ordenada como cola de prioridad por \texttt{heapq}. \texttt{heappop(cola)} extrae y devuelve la tupla menor; los dos primeros campos, prioridad y desempate, se descartan aquí mediante \texttt{\_}. \texttt{current}, \texttt{dest} y \texttt{neighbor} son identificadores de nodo. \texttt{closed} es un conjunto; \texttt{add(nodo)} lo agrega y devuelve \texttt{None}. \texttt{expanded} es un contador y \texttt{+= 1} lo incrementa. \texttt{continue} salta a la siguiente iteración, \texttt{break} termina el bucle. \texttt{\_out\_edges(nodo)} itera pares de vecino y datos; \texttt{edge\_data} es el diccionario de un tramo. \texttt{profile.edge\_cost(datos)} devuelve un número o infinito. \texttt{math.isfinite(número)} devuelve si es finito. \texttt{g\_score} asocia nodos a costes acumulados; \texttt{tentative} es el coste con este nuevo tramo. \texttt{dict.get(clave, valor\_inicial)} devuelve ese valor inicial si falta la clave. \texttt{came\_from} guarda el nodo anterior y el tramo. \texttt{destination} es la coordenada final y \texttt{scale} un multiplicador decimal. \texttt{\_heuristic(nodo, coordenada, escala)} devuelve el coste estimado restante. \texttt{priority} lo suma al coste acumulado. \texttt{counter} es un iterador de enteros y \texttt{next(counter)} devuelve el siguiente valor para desempatar. \texttt{heappush(cola, tupla)} inserta el candidato.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/dijkstra.py}} · commit inicial 0307084, líneas 9--18.}\par
+\begin{Codigo}[firstnumber=9]
+class DijkstraPathFinder(AStarPathFinder):
+    """Dijkstra implementado con la misma cola de prioridad que A*."""
+
+    @property
+    def algorithm(self) -> str:
+        """Nombre del algoritmo."""
+        return "Dijkstra"
+
+    def _heuristic(self, node: NodeId, destination: Coordinate, scale: float) -> float:
+        return 0.0
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{DijkstraPathFinder} hereda el motor de \texttt{AStarPathFinder}. \texttt{@property} convierte \texttt{algorithm(self)} en un atributo de lectura que devuelve un texto. \texttt{\_heuristic(self, node, destination, scale)} conserva la firma de A*: recibe un identificador \texttt{NodeId}, una \texttt{Coordinate} y un factor \texttt{float}. Devuelve siempre el decimal \texttt{0.0}, por lo que solo se ordena por coste acumulado.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/profile.py}} · commit inicial 0307084, líneas 80--84.}\par
+\begin{Codigo}[firstnumber=80]
+    def edge_cost(self, edge_data: Mapping[str, Any]) -> float:
+        """Devuelve la longitud si la vía es ciclable."""
+        if self._forbidden(edge_data):
+            return math.inf
+        return _edge_length(edge_data)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{edge\_data} es el diccionario de atributos de un tramo, con claves de texto y valores diversos. \texttt{\_forbidden(datos)} devuelve \texttt{True} si el tramo está prohibido por las reglas del perfil. \texttt{math.inf} es el valor decimal infinito del módulo estándar \texttt{math}; aquí representa un tramo descartado. \texttt{\_edge\_length(datos)} devuelve sus metros o infinito si no puede obtener una longitud válida. El método \texttt{edge\_cost} devuelve uno de esos valores y no aplica un factor extra.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/routing/profile.py}} · commit inicial 0307084, líneas 156--165.}\par
+\begin{Codigo}[firstnumber=156]
+    def edge_cost(self, edge_data: Mapping[str, Any]) -> float:
+        """Aplica el multiplicador del tipo de vía a la longitud."""
+        if self._forbidden(edge_data):
+            return math.inf
+        length = _edge_length(edge_data)
+        if not math.isfinite(length):
+            return math.inf
+        highway = _tag_text(edge_data.get("highway"))
+        multiplier = self._multipliers.get(highway, self._multipliers["_default"])
+        return length * multiplier
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{length} es la longitud numérica y \texttt{math.isfinite(length)} devuelve si es finita. \texttt{\_tag\_text(valor)} produce una cadena normalizada. \texttt{edge\_data.get('highway')} obtiene la etiqueta de vía o devuelve \texttt{None}. \texttt{highway} guarda el tipo y \texttt{self.\_multipliers} reúne los factores por clase. \texttt{get(tipo, factor\_predeterminado)} elige el factor del tipo o el valor \texttt{\_default}. \texttt{multiplier} es un número decimal; \texttt{*} multiplica los metros por ese factor para producir el coste.
+
+
+\subsection{Servicios: ajuste de puntos y caché}
+El planificador descargaba la zona, buscaba nodos transitables cerca del origen y destino, ejecutaba el buscador y estimaba la duración a partir de la velocidad. El ajuste filtra salidas para el origen y entradas para el destino. El límite inicial de área era 25 km². La caché distinguía el rectángulo, proveedor y perfil, y escribía primero a un temporal para publicar el grafo completo de forma atómica.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · commit inicial 0307084, líneas 60--84.}\par
+\begin{Codigo}[firstnumber=60]
+        bbox = BoundingBox.from_points(origin, dest, margin_m=self._settings.margin_m)
+        if bbox.area_km2 > self._settings.max_area_km2:
+            raise AreaTooLargeError(
+                f"El área de descarga ({bbox.area_km2:.2f} km²) supera el límite "
+                f"configurado ({self._settings.max_area_km2:.2f} km²). "
+                "Acerca los puntos o reduce el margen."
+            )
+
+        graph = self._provider.load_graph(bbox, profile=self._profile.name)
+        if graph.number_of_nodes() == 0:
+            raise ProviderUnavailableError(
+                "La red descargada está vacía. No hay cobertura ciclable en el área."
+            )
+
+        origin_node, origin_snap = self._snap(graph, origin, arriving=False)
+        dest_node, dest_snap = self._snap(graph, dest, arriving=True)
+        warnings = self._snap_warnings(origin_snap, dest_snap)
+        self._check_max_snap(origin_snap, dest_snap)
+
+        search = self._pathfinder.bind(graph, self._profile).find_path(origin_node, dest_node)
+        if not math.isfinite(search.cost) or not math.isfinite(search.distance_m):
+            raise NoRouteFoundError("La ruta calculada no tiene una distancia válida.")
+
+        speed_m_s = self._settings.bike_speed_kmh * 1000.0 / 3600.0
+        duration_s = search.distance_m / speed_m_s
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{self} es el planificador; \texttt{origin} y \texttt{dest} son coordenadas, y \texttt{\_settings} guarda la configuración. \texttt{BoundingBox.from\_points(origen, destino, margin\_m=...)} construye \texttt{bbox}; \texttt{area\_km2} es el área y \texttt{max\_area\_km2} su límite. \texttt{:.2f} muestra dos decimales en una cadena formateada. \texttt{\_provider.load\_graph(rectángulo, profile=nombre)} devuelve \texttt{graph}; \texttt{number\_of\_nodes()} devuelve un entero. \texttt{\_snap(grafo, coordenada, arriving=booleano)} devuelve el identificador ajustado y la distancia; el par se desempaqueta en \texttt{origin\_node}, \texttt{origin\_snap} o \texttt{dest\_node}, \texttt{dest\_snap}. \texttt{\_snap\_warnings(dos distancias)} construye \texttt{warnings}, la lista de avisos. \texttt{\_check\_max\_snap(dos distancias)} devuelve \texttt{None} o lanza un error si se supera el límite. \texttt{\_pathfinder.bind(grafo, perfil)} devuelve el buscador vinculado y \texttt{find\_path(dos nodos)} devuelve \texttt{search}, que incluye coste y distancia. \texttt{math.isfinite} comprueba ambos valores. Las tres excepciones reciben el mensaje del fallo. \texttt{speed\_m\_s} y \texttt{duration\_s} son decimales: se convierten km/h a m/s y se dividen los metros por esa velocidad.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/planner.py}} · commit inicial 0307084, líneas 119--122.}\par
+\begin{Codigo}[firstnumber=119]
+        usable = self._usable_nodes(graph, arriving=arriving)
+        if not usable:
+            return self._provider.nearest_node(graph, coordinate)
+        return self._provider.nearest_node(graph.subgraph(usable), coordinate)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{usable} es un conjunto de identificadores. \texttt{\_usable\_nodes(grafo, arriving=...)} devuelve nodos con aristas transitables de llegada o salida según el booleano \texttt{arriving}. \texttt{coordinate} es la coordenada solicitada. \texttt{graph.subgraph(nodos)} devuelve una vista del grafo limitada a esos nodos. \texttt{\_provider.nearest\_node(grafo\_o\_vista, coordenada)} devuelve una tupla de nodo y distancia. Si el conjunto está vacío, el fragmento consulta el grafo completo.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/services/cache.py}} · commit inicial 0307084, líneas 74--82.}\par
+\begin{Codigo}[firstnumber=74]
+        fd, temp_name = tempfile.mkstemp(prefix=f".{key}.", suffix=".tmp", dir=self._directory)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                pickle.dump(graph, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            Path(temp_name).replace(path)
+        finally:
+            temp_path = Path(temp_name)
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{key} es una cadena que identifica el grafo y \texttt{self.\_directory} es un objeto \texttt{Path} (ruta del sistema de archivos). \texttt{tempfile.mkstemp(prefix=..., suffix=..., dir=...)} devuelve el descriptor entero \texttt{fd} y el nombre temporal \texttt{temp\_name}. \texttt{os.fdopen(fd, 'wb')} devuelve el archivo abierto para escritura binaria; \texttt{with ... as handle} lo cierra al salir. \texttt{pickle.dump(objeto, archivo, protocol=...)} serializa el grafo y devuelve \texttt{None}. \texttt{HIGHEST\_PROTOCOL} es la versión de serialización más alta disponible. \texttt{Path(temp\_name)} crea una ruta y \texttt{replace(path)} sustituye el destino por el temporal y devuelve la ruta resultante. \texttt{finally} se ejecuta incluso si hay error. \texttt{temp\_path.exists()} devuelve un booleano y \texttt{unlink(missing\_ok=True)} elimina el temporal restante sin fallar si ya desapareció.
+
+
+\subsection{Interfaces, visualización, scripts y pruebas}
+\texttt{ui/} contiene la CLI y la interfaz interactiva. Folium genera un mapa Leaflet con marcadores y una polilínea. Matplotlib renderiza la red, geometría, etiquetas, flechas, escala y norte en PNG. \texttt{scripts/} incluía una utilidad para descargar grafos o importar JSON y XML. \texttt{docs/} conservaba el diagrama de clases en Mermaid. \texttt{tests/} aportaba un grafo sintético, una respuesta Overpass guardada y pruebas independientes de la red para el trabajo diario.
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/ui/map_renderer.py}} · commit inicial 0307084, líneas 31--40.}\par
+\begin{Codigo}[firstnumber=31]
+        if result is not None and result.geometry:
+            locations = [(point.lat, point.lon) for point in result.geometry]
+            folium.PolyLine(
+                locations,
+                color="#1565c0",
+                weight=6,
+                opacity=0.85,
+                tooltip="Ruta ciclista",
+            ).add_to(fmap)
+            latitudes = [point[0] for point in locations]
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{result} es un resultado de ruta opcional y \texttt{geometry} su tupla de coordenadas. \texttt{is not None} comprueba que hay objeto; \texttt{and} evita leer la geometría si no lo hay. La comprensión construye \texttt{locations}, una lista de pares latitud-longitud, y \texttt{latitudes}, una lista de números. \texttt{point} recorre cada coordenada. \texttt{folium.PolyLine(locations, color=..., weight=..., opacity=..., tooltip=...)} devuelve la línea para el mapa. El color escrito como cadena hexadecimal, el ancho, la opacidad y el texto flotante afectan su aspecto. \texttt{add\_to(fmap)} añade esa línea al mapa \texttt{fmap} y devuelve la propia línea.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{src/app/visualization/plotter.py}} · commit inicial 0307084, líneas 123--150.}\par
+\begin{Codigo}[firstnumber=123]
+        try:
+            self._configure_axes(ax, extent)
+            if self._draw_basemap(ax):
+                self._collect_labels(graph, extent)
+            else:
+                self._draw_network(ax, graph, extent)
+
+            self._draw_route(ax, route_pts)
+            self._draw_direction_arrows(ax, route_pts)
+
+            origin = self._node_xy(graph, getattr(result, "origin_node", None))
+            dest = self._node_xy(graph, getattr(result, "dest_node", None))
+            reserved = self._draw_endpoints(ax, origin, dest)
+            self._draw_scale_bar(ax, extent)
+            self._draw_north_arrow(ax)
+            self._draw_title(ax, result)
+            self._draw_attribution(ax)
+
+            if self.labels:
+                self._draw_labels(ax, graph, extent, reserved)
+
+            fig.savefig(out_path, dpi=self.dpi, facecolor=fig.get_facecolor())
+        finally:
+            plt.close(fig)
+
+        if show:
+            self._open_file(out_path)
+        return out_path
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{ax} son los ejes de Matplotlib, \texttt{fig} la figura, \texttt{graph} la red, \texttt{extent} los límites proyectados y \texttt{route\_pts} la lista de puntos de la ruta. \texttt{\_configure\_axes(ejes, límites)} prepara la vista. \texttt{\_draw\_basemap(ejes)} devuelve si pudo dibujar el fondo. \texttt{\_collect\_labels(grafo, límites)} reúne etiquetas y \texttt{\_draw\_network(ejes, grafo, límites)} dibuja la red. \texttt{\_draw\_route} y \texttt{\_draw\_direction\_arrows} reciben ejes y ruta y dibujan sus capas. \texttt{getattr(resultado, nombre, None)} devuelve un atributo o \texttt{None}; \texttt{\_node\_xy(grafo, nodo)} devuelve su posición o \texttt{None}. \texttt{origin} y \texttt{dest} son esas posiciones y \texttt{\_draw\_endpoints(ejes, ambas)} devuelve \texttt{reserved}, el espacio reservado para sus rótulos. \texttt{\_draw\_scale\_bar(ejes, límites)}, \texttt{\_draw\_north\_arrow(ejes)}, \texttt{\_draw\_title(ejes, resultado)} y \texttt{\_draw\_attribution(ejes)} dibujan elementos auxiliares. \texttt{\_draw\_labels(ejes, grafo, límites, reservas)} añade los rótulos si \texttt{self.labels} es verdadero. \texttt{fig.get\_facecolor()} devuelve el color de fondo y \texttt{fig.savefig(ruta, dpi=..., facecolor=...)} escribe el PNG. \texttt{plt.close(fig)} libera la figura. \texttt{show} es un booleano; \texttt{\_open\_file(ruta)} solicita abrir la imagen y el método devuelve \texttt{out\_path}, la ruta de salida.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{scripts/descargar_grafo.py}} · commit inicial 0307084, líneas 117--126.}\par
+\begin{Codigo}[firstnumber=117]
+def _load_from_json(path: Path) -> nx.MultiDiGraph:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return parse_overpass_payload(payload)
+
+
+def _load_from_xml(path: Path) -> nx.MultiDiGraph:
+    graph = ox.graph_from_xml(path, simplify=True, retain_all=False)
+    if graph.number_of_nodes() == 0 or graph.number_of_edges() == 0:
+        raise ValueError("El XML no contiene una red válida.")
+    return OsmnxProvider._project_and_keep_latlon(graph)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{path: Path} señala el archivo. \texttt{path.read\_text(encoding='utf-8')} devuelve su contenido como texto; \texttt{json.loads(texto)} lo convierte a estructuras Python. \texttt{payload} es ese conjunto de datos. \texttt{parse\_overpass\_payload(datos)} devuelve el grafo a partir de nodos y vías. En XML, \texttt{ox.graph\_from\_xml(ruta, simplify=..., retain\_all=...)} devuelve un grafo. \texttt{number\_of\_nodes()} y \texttt{number\_of\_edges()} devuelven enteros y se comprueba que haya nodos y tramos. \texttt{OsmnxProvider.\_project\_and\_keep\_latlon(grafo)} devuelve un grafo proyectado conservando latitud y longitud.
+
+
+\smallskip
+{\footnotesize\texttt{\detokenize{tests/test_astar.py}} · commit inicial 0307084, líneas 18--28.}\par
+\begin{Codigo}[firstnumber=18]
+def test_abstract_classes_cannot_be_instantiated() -> None:
+    with pytest.raises(TypeError):
+        CostProfile()  # type: ignore[abstract]
+    with pytest.raises(TypeError):
+        PathFinder()  # type: ignore[abstract]
+
+
+def test_astar_matches_networkx_dijkstra_on_twenty_pairs(synthetic_graph) -> None:
+    rng = random.Random(2026)
+    profile = ShortestProfile()
+    finder = AStarPathFinder(synthetic_graph, profile)
+\end{Codigo}
+
+\textbf{Lectura del fragmento.} \texttt{pytest} es un ejecutor de pruebas. \texttt{pytest.raises(TipoDeError)} crea un contexto que valida que aparezca esa excepción. \texttt{CostProfile()} y \texttt{PathFinder()} se intentan construir sin parámetros, pero son clases abstractas y generan \texttt{TypeError}. El comentario \texttt{type: ignore[abstract]} indica al comprobador estático que la llamada inválida es deliberada. \texttt{synthetic\_graph} es un grafo de prueba entregado por pytest. \texttt{random.Random(2026)} devuelve \texttt{rng}, un generador pseudoaleatorio reproducible con una semilla fija. \texttt{ShortestProfile()} crea \texttt{profile} y \texttt{AStarPathFinder(grafo, perfil)} crea \texttt{finder}, el buscador que se compara con Dijkstra de NetworkX.
+
+
+\end{document}

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import time
+
 import networkx as nx
 
 from app.domain.models import BoundingBox, Coordinate
@@ -39,3 +42,25 @@ def test_disabled_cache_does_not_write(tmp_path) -> None:
     cache.save(key, _graph())
     assert cache.load(key) is None
     assert not cache.directory.exists()
+
+
+def test_prune_expires_and_limits_only_cache_files(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.cache.GRAPH_CACHE_LIMIT_BYTES", 12)
+    cache = GraphCache(tmp_path)
+    osmnx = tmp_path / "osmnx"
+    osmnx.mkdir()
+    expired = osmnx / ("a" * 40 + ".json")
+    older = osmnx / ("b" * 40 + ".json")
+    recent = osmnx / ("c" * 40 + ".json")
+    unrelated = osmnx / "mis-datos.json"
+    now = time.time()
+    for path, seconds_ago in ((expired, 20 * 86400), (older, 60), (recent, 0), (unrelated, 0)):
+        path.write_bytes(b"12345678")
+        os.utime(path, (now - seconds_ago, now - seconds_ago))
+
+    assert cache.prune() == 2
+    assert recent.exists()
+    assert unrelated.exists()
+    assert cache.clear() == 1
+    assert not recent.exists()
+    assert unrelated.exists()

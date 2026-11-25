@@ -6,12 +6,20 @@ import hashlib
 import os
 import pickle
 import re
+import stat
 import tempfile
+import time
+from contextlib import suppress
 from pathlib import Path
 
 import networkx as nx
 
 from app.domain.models import BoundingBox
+
+GRAPH_TTL_S = 14 * 24 * 3600
+GRAPH_CACHE_LIMIT_BYTES = 150 * 1024**2
+_GRAPH_NAME = re.compile(r"(?:osmnx|overpass)_[\w.-]+_.+_[a-f0-9]{12}\.pkl")
+_OSMNX_NAME = re.compile(r"[a-f0-9]{40}\.json")
 
 
 class GraphCache:
@@ -52,9 +60,10 @@ class GraphCache:
         if not self._enabled:
             return None
         path = self._path_for(key)
-        if not path.exists():
-            return None
         try:
+            if path.stat().st_mtime <= time.time() - GRAPH_TTL_S:
+                path.unlink(missing_ok=True)
+                return None
             with path.open("rb") as handle:
                 graph = pickle.load(handle)  # noqa: S301 - caché local propia
         except (OSError, EOFError, pickle.PickleError, AttributeError, ImportError):
@@ -80,13 +89,54 @@ class GraphCache:
             temp_path = Path(temp_name)
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
+        self.prune()
 
-    def clear(self) -> None:
-        """Elimina los grafos almacenados."""
-        if not self._directory.exists():
-            return
-        for path in self._directory.glob("*.pkl"):
-            path.unlink(missing_ok=True)
+    def clear(self) -> int:
+        """Elimina los grafos y descargas de OSMnx reconocidos."""
+        return self._prune(max_bytes=0, cutoff=float("inf"))
+
+    def prune(self) -> int:
+        """Elimina archivos vencidos y luego los más antiguos hasta respetar la cuota."""
+        return self._prune(GRAPH_CACHE_LIMIT_BYTES, time.time() - GRAPH_TTL_S)
+
+    def _prune(self, max_bytes: int, cutoff: float) -> int:
+        try:
+            if not _cache_folder(self._directory):
+                return 0
+        except OSError:
+            return 0
+        entries = []
+        for folder, pattern in (
+            (self._directory, _GRAPH_NAME),
+            (self._directory / "osmnx", _OSMNX_NAME),
+        ):
+            with suppress(OSError):
+                if not _cache_folder(folder):
+                    continue
+                for path in folder.iterdir():
+                    if pattern.fullmatch(path.name):
+                        with suppress(OSError):
+                            info = path.lstat()
+                            if stat.S_ISREG(info.st_mode):
+                                entries.append((info.st_mtime, info.st_size, path))
+        total = sum(size for _, size, _ in entries)
+        removed = 0
+        for age, size, path in sorted(entries):
+            if age > cutoff and total <= max_bytes:
+                break
+            with suppress(OSError):
+                current = path.lstat()
+                if current.st_mtime == age and current.st_size == size:
+                    path.unlink()
+                    total -= size
+                    removed += 1
+        return removed
 
     def _path_for(self, key: str) -> Path:
         return self._directory / f"{key}.pkl"
+
+
+def _cache_folder(path: Path) -> bool:
+    info = path.lstat()
+    attributes = getattr(info, "st_file_attributes", 0)
+    return stat.S_ISDIR(info.st_mode) and not attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT

@@ -72,6 +72,7 @@ class OsmnxProvider(GraphProvider):
         ox.settings.http_user_agent = self._user_agent
         ox.settings.requests_timeout = self._requests_timeout_s
         if self._cache is not None and cache_enabled:
+            self._cache.prune()
             ox.settings.cache_folder = str(self._cache.directory / "osmnx")
 
         try:

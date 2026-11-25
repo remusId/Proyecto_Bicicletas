@@ -9,10 +9,7 @@ from pathlib import Path
 
 from app.domain.models import BoundingBox, Coordinate
 
-DEFAULT_USER_AGENT = (
-    "ProyectoFinalPOO/0.1 (proyecto academico; "
-    "configura OSM_USER_AGENT con un contacto identificable)"
-)
+DEFAULT_USER_AGENT = "RutasCiclistas/0.1 (configura OSM_USER_AGENT con un contacto identificable)"
 OVERPASS_MIRRORS = (
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.nextgis.com/api/interpreter",

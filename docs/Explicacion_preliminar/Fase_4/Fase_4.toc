@@ -1,0 +1,5 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Fase 4. Ejecutable autónomo y control del almacenamiento}{2}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Scripts y distribución: cómo se creó el EXE}{2}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Servicios y barra lateral: caché automática y manual}{4}{subsection.1.2}%
+\contentsline {section}{\numberline {2}Documentación y verificación}{6}{section.2}%

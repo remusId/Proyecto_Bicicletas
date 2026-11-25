@@ -22,6 +22,24 @@ perfiles de coste, dos algoritmos, interfaz Streamlit/Folium y CLI.
 
 ## Abrir sin terminal
 
+### Para compartir en Windows x64
+
+Entrega solo `RutasCiclistas.exe` de la carpeta de distribución. Si tienes
+`dist/actualizado/RutasCiclistas.exe`, comparte esa copia. La persona que lo recibe hace doble clic
+y la app se abre en el navegador. Python y las dependencias vienen incluidos.
+El mapa base, la búsqueda y la descarga inicial de grafos necesitan Internet.
+El primer arranque puede tardar mientras se extraen los archivos del ejecutable.
+
+Para generar el ejecutable desde el código, instala PyInstaller en el entorno
+de desarrollo y ejecuta este script desde PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install pyinstaller
+.\scripts\compilar_windows.ps1
+```
+
+### Desde el código fuente
+
 En Windows, haz doble clic en `lanzar_silencioso.vbs` o en `iniciar_app.bat`.
 El lanzador prepara el entorno si hace falta y abre el navegador cuando Streamlit
 responde. Usa el puerto 8501 si está libre y elige otro si está ocupado.
@@ -59,7 +77,7 @@ Consulta la [política de uso de Nominatim](https://operations.osmfoundation.org
 Overpass prueba los servidores en orden y comparte entre ellos un presupuesto
 de 90 segundos (`APP_OVERPASS_DEADLINE_S`). Usa `APP_OVERPASS_URLS` para pasar
 una lista separada por comas. Si solo defines `OVERPASS_URL`, se usa ese servidor.
-Puedes reintentar en unos minutos o elegir OSMnx en la barra lateral o con
+Puedes reintentar en unos minutos o elegir OSMnx en **Configuración avanzada** o con
 `--provider osmnx`. OSMnx también depende de la disponibilidad de su propio endpoint.
 
 ## Si no hay ruta
@@ -111,8 +129,9 @@ streamlit run src/app/ui/streamlit_app.py
 ```
 
 1. Elige backend (`osmnx` o `overpass`), perfil (`bike` o `shortest`) y
-   algoritmo (`astar` o `dijkstra`) en la barra lateral.
-2. Selecciona «Origen» o «Destino» y haz clic en el mapa.
+   algoritmo (`astar` o `dijkstra`) en **Configuración avanzada**.
+2. Usa los campos independientes de coordenadas, o selecciona «Origen» o
+   «Destino» y haz clic en el mapa.
 3. Pulsa «Calcular ruta».
 4. La app muestra distancia, tiempo estimado, nodos expandidos, backend,
    distancias de snap, avisos y el mapa con la ruta.
@@ -231,7 +250,10 @@ pytest -m network -q
   el perfil activo (por ejemplo, pasillos `corridor` o escaleras dentro de un
   centro comercial), de modo que un punto en el interior de un recinto se
   ajusta a la calle ciclable más próxima en lugar de quedar aislado.
-- La caché no caduca automáticamente; borra `.cache/graphs` para refrescarla.
+- La caché de grafos y descargas de OSMnx caduca en 14 días y se limita a 150 MiB.
+  Se revisa al usar la web y tras escribir un grafo. **Limpiar caché**, en
+  **Configuración avanzada**, borra también las búsquedas guardadas en disco. El ejecutable
+  guarda la caché en `%LOCALAPPDATA%\RutasCiclistas\cache`.
 - No hay fallback automático entre backends: si uno falla, el usuario debe
   cambiar de backend.
 

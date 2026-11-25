@@ -1,0 +1,4 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Fase 3. Diagnóstico, reintentos y bloqueo de la web}{2}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Servicios: diagnóstico y alternativas}{2}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Streamlit: solicitud pendiente sin bloquear}{5}{subsection.1.2}%
