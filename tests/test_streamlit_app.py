@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event
+from unittest.mock import Mock
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from app.domain.models import BoundingBox, Coordinate, RouteResult
+from app.providers.overpass_provider import OverpassProvider
+from app.services import desktop_session
 from app.services.planner import RoutePlanner
-from app.services.ui_state import MapView, ViewStore
+from app.services.ui_state import MapView
 
 APP_PATH = Path(__file__).parents[1] / "src" / "app" / "ui" / "streamlit_app.py"
 
@@ -47,18 +51,58 @@ def test_streamlit_app_starts_without_exceptions() -> None:
     assert "proyecto academico" not in str(app.caption)
 
 
-def test_streamlit_keeps_coordinate_view_in_new_session(tmp_path, monkeypatch) -> None:
-    path = tmp_path / "view.json"
+def test_streamlit_starts_in_lima_and_keeps_view_only_in_session(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "ui_state.json"
+    previous_view = '{"lat": 46.6, "lon": 1.8, "zoom": 5}'
+    path.write_text(previous_view, encoding="utf-8")
     monkeypatch.setenv("APP_UI_STATE", str(path))
+    default_view = MapView(Coordinate(-12.0464, -77.0428), 14)
     app = AppTest.from_file(APP_PATH, default_timeout=60).run()
+    assert app.session_state["map_view"] == default_view
     app.text_input[0].set_value("-12.019720,-77.048610")
     next(button for button in app.button if button.label == "Fijar origen").click().run()
     assert not app.exception
     expected = MapView(Coordinate(-12.019720, -77.048610), 16)
-    assert ViewStore(path).load(MapView(Coordinate(0, 0), 14)) == expected
+    assert app.run().session_state["map_view"] == expected
     fresh = AppTest.from_file(APP_PATH, default_timeout=60).run()
     assert not fresh.exception
-    assert fresh.session_state["map_view"] == expected
+    assert fresh.session_state["map_view"] == default_view
+    assert path.read_text(encoding="utf-8") == previous_view
+
+
+def test_desktop_exit_calls_launcher_shutdown(monkeypatch) -> None:
+    shutdown = Mock()
+    register = Mock()
+    monkeypatch.setattr(desktop_session, "shutdown", shutdown)
+    monkeypatch.setattr(st.components.v2, "component", register)
+    app = AppTest.from_file(APP_PATH, default_timeout=10).run()
+    next(button for button in app.button if button.label == "Salir de la aplicación").click().run()
+    assert not app.exception
+    shutdown.assert_called_once_with()
+    register.return_value.assert_called_once_with()
+    assert "Aplicación cerrada" in register.call_args.kwargs["js"]
+
+
+@pytest.mark.parametrize(
+    ("origin", "dest"),
+    [
+        (
+            Coordinate(8.754794702435618, -78.35449218750001),
+            Coordinate(46.800059446787316, -99.140625),
+        ),
+        (Coordinate(39, -105), Coordinate(39, -101)),
+    ],
+)
+def test_oversized_route_shows_download_limit_before_prefetch(origin, dest) -> None:
+    app = AppTest.from_file(APP_PATH, default_timeout=10).run()
+    app.session_state["origin"] = origin
+    app.session_state["dest"] = dest
+    app.run()
+
+    assert not app.exception
+    assert app.session_state.get("prefetch") is None
+    assert "Esta ruta requiere descargar" in app.error[0].value
+    assert "calcula el recorrido por tramos" in app.error[0].value
 
 
 def test_coordinate_form_keeps_origin_and_destination_independent(tmp_path, monkeypatch) -> None:
@@ -134,3 +178,60 @@ def test_calculate_waits_without_blocking_web_session(tmp_path, monkeypatch) -> 
     app.run()
     assert not app.exception
     assert app.session_state["route_result"] == result
+
+
+def test_shows_terrestrial_route_error_for_lima_to_france(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_UI_STATE", str(tmp_path / "view.json"))
+
+    def unexpected_download(*args, **kwargs):
+        pytest.fail("Una ruta transatlántica no debe consultar a Overpass.")
+
+    monkeypatch.setattr(OverpassProvider, "load_graph", unexpected_download)
+    app = AppTest.from_file(APP_PATH, default_timeout=10).run()
+    app.session_state["origin"] = Coordinate(-12.0464, -77.0428)
+    app.session_state["dest"] = Coordinate(46.6034, 1.8883)
+    app.run()
+
+    assert not app.exception
+    assert [error.value for error in app.error] == [
+        "No existe una ruta por tierra entre el origen y el destino. "
+        "Los puntos están en zonas terrestres separadas por agua."
+    ]
+
+
+def test_wrapped_map_click_shows_pacific_route_error(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_UI_STATE", str(tmp_path / "view.json"))
+    map_output = {}
+    monkeypatch.setattr("streamlit_folium.st_folium", lambda *args, **kwargs: map_output)
+
+    app = AppTest.from_file(APP_PATH, default_timeout=10).run()
+    app.session_state["origin"] = Coordinate(34, -118)
+    app.radio[0].set_value("Destino").run()
+    map_output["last_clicked"] = {"lat": -37, "lng": -185}
+    map_output["center"] = map_output["last_clicked"]
+    map_output["zoom"] = 5
+    app.run()
+
+    assert not app.exception
+    assert app.session_state["dest"] == Coordinate(-37, 175)
+    assert app.session_state["map_view"] == MapView(Coordinate(-37, 175), 5)
+    assert app.session_state.get("prefetch") is None
+    assert [error.value for error in app.error] == [
+        "No existe una ruta por tierra entre el origen y el destino. "
+        "Los puntos están en zonas terrestres separadas por agua."
+    ]
+
+
+def test_invalid_map_click_shows_warning(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_UI_STATE", str(tmp_path / "view.json"))
+    monkeypatch.setattr(
+        "streamlit_folium.st_folium",
+        lambda *args, **kwargs: {"last_clicked": {"lat": 91, "lng": 20}},
+    )
+    app = AppTest.from_file(APP_PATH, default_timeout=10).run()
+
+    assert not app.exception
+    assert app.session_state["origin"] is None
+    assert [warning.value for warning in app.warning] == [
+        "No se pudo seleccionar ese punto. Haz clic de nuevo en el mapa."
+    ]

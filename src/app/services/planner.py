@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import networkx as nx
 
@@ -19,6 +20,16 @@ from app.routing.base import PathFinder
 from app.routing.geo import node_coordinate
 from app.routing.profile import CostProfile
 from app.services.diagnostics import explain_no_route, retry_pairs
+from app.services.land_connections import check_land_route
+
+
+@dataclass(frozen=True)
+class _PreparedRoute:
+    bbox: BoundingBox
+    graph: nx.MultiDiGraph
+    origin: Coordinate
+    dest: Coordinate
+    snaps: tuple[tuple[NodeId, float], tuple[NodeId, float]] | None
 
 
 class RoutePlanner:
@@ -35,7 +46,7 @@ class RoutePlanner:
         self._profile = profile
         self._pathfinder = pathfinder
         self._settings = settings
-        self._prepared: tuple[BoundingBox, nx.MultiDiGraph] | None = None
+        self._prepared: _PreparedRoute | None = None
 
     @property
     def provider(self) -> GraphProvider:
@@ -58,6 +69,7 @@ class RoutePlanner:
         return self._settings
 
     def _bbox(self, origin: Coordinate, dest: Coordinate) -> BoundingBox:
+        check_land_route(origin, dest)
         bbox = BoundingBox.from_points(origin, dest, margin_m=self._settings.margin_m)
         if bbox.area_km2 > self._settings.max_area_km2:
             raise AreaTooLargeError(
@@ -68,9 +80,11 @@ class RoutePlanner:
         return bbox
 
     def prefetch(self, origin: Coordinate, dest: Coordinate) -> None:
-        """Carga la red para la siguiente llamada a plan con el mismo recorte."""
+        """Carga la red y ajusta los puntos antes de buscar la ruta."""
         bbox = self._bbox(origin, dest)
-        self._prepared = bbox, self._provider.load_graph(bbox, profile=self._profile.name)
+        graph = self._provider.load_graph(bbox, profile=self._profile.name)
+        snaps = self._snap_endpoints(graph, origin, dest) if graph.number_of_nodes() else None
+        self._prepared = _PreparedRoute(bbox, graph, origin, dest, snaps)
 
     def plan(self, origin: Coordinate, dest: Coordinate) -> RouteResult:
         """Calcula la ruta entre dos coordenadas."""
@@ -83,8 +97,11 @@ class RoutePlanner:
     def _plan(self, origin: Coordinate, dest: Coordinate, *, retry: bool) -> RouteResult:
         bbox = self._bbox(origin, dest)
         prepared = self._prepared
-        if prepared is not None and prepared[0] == bbox:
-            graph = prepared[1]
+        snaps = None
+        if prepared is not None and prepared.bbox == bbox:
+            graph = prepared.graph
+            if (origin, dest) == (prepared.origin, prepared.dest):
+                snaps = prepared.snaps
         else:
             graph = self._provider.load_graph(bbox, profile=self._profile.name)
 
@@ -93,8 +110,9 @@ class RoutePlanner:
                 "La red descargada está vacía. No hay cobertura ciclable en el área."
             )
 
-        origin_node, origin_snap = self._snap(graph, origin, arriving=False)
-        dest_node, dest_snap = self._snap(graph, dest, arriving=True)
+        if snaps is None:
+            snaps = self._snap_endpoints(graph, origin, dest)
+        (origin_node, origin_snap), (dest_node, dest_snap) = snaps
         self._check_max_snap(origin_snap, dest_snap)
 
         finder = self._pathfinder.bind(graph, self._profile)
@@ -175,32 +193,28 @@ class RoutePlanner:
             alternative_dest=alternative_dest,
         )
 
-    def _snap(
+    def _snap_endpoints(
         self,
         graph: nx.MultiDiGraph,
-        coordinate: Coordinate,
-        *,
-        arriving: bool,
-    ) -> tuple[NodeId, float]:
-        """Ajusta la coordenada al nodo más cercano que el perfil puede usar.
-
-        Se descartan los nodos sin ninguna arista transitable, de modo que un
-        punto dentro de un recinto (pasillos, escaleras, aparcamientos) no
-        bloquee la búsqueda con un nodo aislado para el perfil activo.
-        """
-        usable = self._usable_nodes(graph, arriving=arriving)
-        if not usable:
-            return self._provider.nearest_node(graph, coordinate)
-        return self._provider.nearest_node(graph.subgraph(usable), coordinate)
-
-    def _usable_nodes(self, graph: nx.MultiDiGraph, *, arriving: bool) -> set[NodeId]:
-        """Nodos con al menos una arista transitable de entrada o de salida."""
-        usable: set[NodeId] = set()
+        origin: Coordinate,
+        dest: Coordinate,
+    ) -> tuple[tuple[NodeId, float], tuple[NodeId, float]]:
+        """Ajusta cada punto a un nodo transitable en la dirección requerida."""
+        outgoing: set[NodeId] = set()
+        incoming: set[NodeId] = set()
         for source, target, data in graph.edges(data=True):
-            if not math.isfinite(self._profile.edge_cost(data)):
-                continue
-            usable.add(target if arriving else source)
-        return usable
+            if math.isfinite(self._profile.edge_cost(data)):
+                outgoing.add(source)
+                incoming.add(target)
+        if not outgoing:
+            return (
+                self._provider.nearest_node(graph, origin),
+                self._provider.nearest_node(graph, dest),
+            )
+        return (
+            self._provider.nearest_node(graph.subgraph(outgoing), origin),
+            self._provider.nearest_node(graph.subgraph(incoming), dest),
+        )
 
     def _snap_warnings(self, origin_snap: float, dest_snap: float) -> list[str]:
         warnings: list[str] = []

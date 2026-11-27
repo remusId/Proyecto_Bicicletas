@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from app.domain.exceptions import AreaTooLargeError
 from app.domain.models import BoundingBox, Coordinate
 
 DEFAULT_USER_AGENT = "RutasCiclistas/0.1 (configura OSM_USER_AGENT con un contacto identificable)"
@@ -14,6 +15,8 @@ OVERPASS_MIRRORS = (
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.nextgis.com/api/interpreter",
 )
+_MAX_LOCAL_AREA_KM2 = 2500
+_MAX_LOCAL_SPAN_KM = 250
 
 
 def _env_float(name: str, default: float) -> float:
@@ -52,7 +55,9 @@ class Settings:
     overpass_retries: int = 3
     user_agent: str = DEFAULT_USER_AGENT
     network_type: str = "bike"
-    default_center: Coordinate = field(default_factory=lambda: Coordinate(lat=40.4168, lon=-3.7038))
+    default_center: Coordinate = field(
+        default_factory=lambda: Coordinate(lat=-12.0464, lon=-77.0428)
+    )
     map_zoom: int = 14
     overpass_urls: tuple[str, ...] = ()
     overpass_deadline_s: float = 90.0
@@ -87,8 +92,19 @@ class Settings:
         object.__setattr__(self, "cache_dir", Path(self.cache_dir))
 
     def with_area_for(self, origin: Coordinate, dest: Coordinate) -> Settings:
-        """Amplía el límite base hasta cubrir los puntos y el margen."""
-        area = BoundingBox.from_points(origin, dest, self.margin_m).area_km2
+        """Ajusta el área de descarga para una solicitud de alcance local."""
+        bbox = BoundingBox.from_points(origin, dest, self.margin_m)
+        area = bbox.area_km2
+        span = max(bbox.width_m, bbox.height_m) / 1000
+        if area > _MAX_LOCAL_AREA_KM2 or span > _MAX_LOCAL_SPAN_KM:
+            area_label = f"{area:,.0f}".replace(",", " ")
+            raise AreaTooLargeError(
+                f"Esta ruta requiere descargar {area_label} km² de mapa "
+                f"y el área mide {span:.0f} km de lado mayor. "
+                f"La app admite descargas locales de hasta {_MAX_LOCAL_AREA_KM2} km² "
+                f"y {_MAX_LOCAL_SPAN_KM} km por lado. "
+                "Acerca los puntos o calcula el recorrido por tramos."
+            )
         if area <= self.max_area_km2:
             return self
         return replace(self, max_area_km2=area)

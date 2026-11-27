@@ -1,0 +1,9 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Ejecutar el mismo caso de uso desde la terminal}{2}{section.1}%
+\contentsline {section}{\numberline {2}Exportar un PNG con \texttt {visualization/}}{3}{section.2}%
+\contentsline {section}{\numberline {3}Preparar y distribuir la aplicación}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Ejecutar desde la raíz o desde \texttt {dist/}}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Una instancia local y cierre coordinado}{6}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Preparar la caché sin la interfaz}{7}{subsection.3.3}%
+\contentsline {section}{\numberline {4}Verificar el comportamiento en \texttt {tests/}}{8}{section.4}%
+\contentsline {section}{\numberline {5}Ubicar los materiales de apoyo y cerrar}{9}{section.5}%

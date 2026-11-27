@@ -95,6 +95,12 @@ class BoundingBox:
         max_lat = max(first.lat, second.lat)
         min_lon = min(first.lon, second.lon)
         max_lon = max(first.lon, second.lon)
+        if max_lon - min_lon > 180.0:
+            raise ValueError(
+                "Los puntos están a ambos lados del meridiano de 180°. "
+                "La app no puede descargar esa zona en una sola consulta. "
+                "Calcula tramos a cada lado del meridiano."
+            )
 
         mid_lat = radians((min_lat + max_lat) / 2.0)
         lat_pad = degrees(margin_m / EARTH_RADIUS_M)
@@ -111,8 +117,8 @@ class BoundingBox:
     @property
     def width_m(self) -> float:
         """Ancho aproximado de la caja en metros."""
-        mid_lat = (self.south + self.north) / 2.0
-        return haversine_m(mid_lat, self.west, mid_lat, self.east)
+        mid_lat = radians((self.south + self.north) / 2.0)
+        return EARTH_RADIUS_M * cos(mid_lat) * radians(self.east - self.west)
 
     @property
     def height_m(self) -> float:

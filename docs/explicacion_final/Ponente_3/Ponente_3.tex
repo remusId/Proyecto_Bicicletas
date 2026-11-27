@@ -1,0 +1,173 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+
+\title{Rutas ciclistas sobre OpenStreetMap\\Informe técnico}
+\author{Ponente 3 de 4 · Proyecto Final de Programación Orientada a Objetos}
+\date{}
+
+\begin{document}
+\maketitle
+\setcounter{section}{2}
+\section{Integración del cálculo y planificación de rutas}
+
+\subsection{Fundamentos de la planificación de rutas}
+
+\subsubsection{Correspondencia entre coordenadas y nodos}
+Al seleccionar Plaza Norte en el mapa, es posible marcar el interior del centro comercial en lugar de un cruce. El buscador del tema anterior recorre las conexiones del grafo, así que necesita empezar en uno de sus nodos. El planificador convierte la posición elegida en un nodo apropiado de la red. A este ajuste se le llama \emph{snap}. La distancia entre ambos puntos se informa por separado porque el recorrido calculado empieza en el nodo de la red.
+
+La cercanía y la conectividad se comprueban de maneras diferentes. Dos nodos pueden estar cerca en metros y pertenecer a calles separadas por una barrera. También puede existir conexión física, pero en el sentido contrario al solicitado. Para ir desde \(A\) a \(B\) se necesita una cadena de aristas que salga de \(A\) y llegue a \(B\) siguiendo los sentidos permitidos.
+
+\subsubsection{Composición e inyección de dependencias}
+Para hacer ese ajuste y calcular la ruta, el planificador necesita una fuente de datos, un criterio para valorar las vías y un algoritmo de búsqueda. Recibe esos componentes cuando se construye, una práctica conocida como \emph{inyección de dependencias}. El proveedor determina cómo se obtiene la red, el perfil cómo se puntúan los tramos y el buscador cómo se exploran. El planificador coordina sus llamadas mediante los contratos de cada componente.
+
+La inyección también permite probar el planificador con un grafo pequeño entregado por un proveedor de prueba. Por ejemplo, se puede preparar una sola arista de \(A\) a \(B\) y comprobar qué extremos recibe el buscador. La prueba controla la red sin descargar calles de Internet.
+
+\subsubsection{Precarga y contrato del resultado}
+Una vez elegidos los puntos, la aplicación web puede empezar a preparar la red mientras el usuario conserva el control de la interfaz. Esta \emph{precarga} adelanta la obtención del grafo y el ajuste de los extremos. Si al calcular la ruta sigue correspondiendo la misma caja, el grafo se puede reutilizar. Los ajustes también se pueden reutilizar si coinciden las dos coordenadas. Si un punto cambió, es necesario comprobar de nuevo qué nodo le corresponde.
+
+Después de buscar, la duración se estima con la distancia y la velocidad. Los nombres de los campos indican sus unidades: \texttt{distance\_m} guarda metros y \texttt{duration\_s} segundos. El resultado reúne esos datos junto con nodos, geometría, avisos y métricas. Una interfaz puede convertir las unidades y decidir cómo presentarlas sin rehacer el cálculo.
+
+\clearpage
+
+\subsection{Preparación de la red y ajuste de los extremos}
+
+El planificador prepara el grafo y ajusta las coordenadas a la red antes de delegar la búsqueda.
+
+\texttt{services/planner.py} reúne esos pasos en \texttt{RoutePlanner}. El constructor recibe el proveedor, el perfil, el buscador y la configuración. Esto combina \textbf{composición e inyección de dependencias}: el planificador usa objetos que se le entregan y puede trabajar con distintas implementaciones del mismo contrato.
+
+Primero comprueba la separación terrestre y el tamaño de la zona. Luego obtiene el grafo, o reutiliza el que quedó preparado en la precarga. Un clic dentro de Plaza Norte puede caer lejos de una calle transitable. El planificador busca para el origen un nodo con salida permitida por el perfil y para el destino un nodo con entrada permitida. A ese ajuste se lo llama \emph{snap}. La distancia del ajuste permite advertir cuánto se movió el punto.
+
+\subsubsection{Selección de nodos según el sentido vial}
+
+\textbf{Antes del fragmento (líneas 1--202).} El archivo define el estado de una precarga y un constructor que conserva los cuatro objetos inyectados. Los métodos públicos preparan la red o piden una ruta. El flujo privado valida la zona y carga el grafo o aprovecha el preparado. A continuación necesita los nodos de los extremos. Para ello llama a \texttt{\_snap\_endpoints} tanto al preparar la solicitud como cuando hace falta ajustar de nuevo.
+
+La firma de ese método, justo antes del recorte, recibe el grafo y las dos coordenadas. Devuelve un par para cada extremo, con identificador de nodo y distancia de ajuste. El fragmento muestra cómo delimita los candidatos de cada extremo.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/services/planner.py} · líneas 203--217.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=203]
+        outgoing: set[NodeId] = set()
+        incoming: set[NodeId] = set()
+        for source, target, data in graph.edges(data=True):
+            if math.isfinite(self._profile.edge_cost(data)):
+                outgoing.add(source)
+                incoming.add(target)
+        if not outgoing:
+            return (
+                self._provider.nearest_node(graph, origin),
+                self._provider.nearest_node(graph, dest),
+            )
+        return (
+            self._provider.nearest_node(graph.subgraph(outgoing), origin),
+            self._provider.nearest_node(graph.subgraph(incoming), dest),
+        )
+\end{Codigo}
+\end{minipage}\par
+
+Una calle de un solo sentido ayuda a leer esas líneas. Si la arista va de \(A\) a \(B\), aporta una salida a \(A\) y una entrada a \(B\). \texttt{outgoing} se usa para ajustar el origen y \texttt{incoming} para el destino. Los conjuntos se forman con todo el grafo transitable para el perfil activo. El proveedor elige el nodo más cercano dentro del conjunto que corresponda.
+
+El ajuste comprueba la cercanía de cada extremo. El buscador comprueba si se puede viajar entre ambos siguiendo las aristas dirigidas. Si los puntos quedan en dos componentes separadas, el primer intento puede fallar aun cuando cada extremo esté cerca de una calle. Con alternativas activadas se prueban otros accesos y se conserva el desplazamiento en línea recta para avisar al usuario. Ese desplazamiento queda fuera del trayecto calculado.
+
+\subsection{Búsqueda, alternativas y consolidación del resultado}
+
+\textbf{Antes del fragmento (líneas 1--112).} Al invocar el cálculo, el planificador comprueba la zona y consulta la precarga. Si coincide la caja, puede recuperar el grafo. Solo recupera los ajustes si coinciden también las dos coordenadas. Si no hay una red en memoria, llama al proveedor. Antes de continuar comprueba que el grafo tenga nodos.
+
+La variable \texttt{snaps} llega con los ajustes preparados o con \texttt{None}, que indica que aún hay que calcularlos. Por eso el fragmento empieza con una condición. Luego verifica el máximo de ajuste y vincula al buscador el grafo y el perfil antes de que se intente la ruta.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/services/planner.py} · líneas 113--122.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=113]
+        if snaps is None:
+            snaps = self._snap_endpoints(graph, origin, dest)
+        (origin_node, origin_snap), (dest_node, dest_snap) = snaps
+        self._check_max_snap(origin_snap, dest_snap)
+
+        finder = self._pathfinder.bind(graph, self._profile)
+        alternative_origin = alternative_dest = None
+        try:
+            search = finder.find_path(origin_node, dest_node)
+        except NoRouteFoundError as exc:
+\end{Codigo}
+\end{minipage}\par
+
+En el código, \texttt{bind} entrega el grafo y el perfil al buscador. \texttt{find\_path} trabaja con los dos nodos ajustados. Si el camino falla y se habilitaron alternativas, el planificador puede intentar otros nodos conectados y registrar qué extremo cambió para mostrarlo después.
+
+\textbf{Antes del fragmento (líneas 1--170).} El planificador ya preparó el grafo y llamó al buscador sobre los nodos elegidos. Si falla el primer intento y se permiten alternativas, prueba otros pares y revisa su distancia de ajuste. Si ninguno sirve, añade un diagnóstico al error. Cuando hay un resultado válido, prepara avisos para los ajustes largos o para los extremos sustituidos.
+
+En la línea 171, \texttt{search} ya contiene el camino hallado y la distancia física. \texttt{graph} sigue disponible para recuperar las coordenadas de los nodos. El siguiente cálculo usa metros y segundos para que distancia y velocidad puedan dividirse directamente.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/services/planner.py} · líneas 171--177.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=171]
+        speed_m_s = self._settings.bike_speed_kmh * 1000.0 / 3600.0
+        duration_s = search.distance_m / speed_m_s
+        geometry = tuple(node_coordinate(graph, node) for node in search.nodes)
+        return RouteResult(
+            nodes=search.nodes,
+            distance_m=search.distance_m,
+            duration_s=duration_s,
+\end{Codigo}
+\end{minipage}\par
+
+Entre las últimas operaciones está calcular una duración estimada con la distancia física. Por ejemplo, 3000 m a 15 km/h dan 12 minutos. El resultado también conserva el coste ponderado como dato separado, los nodos, las coordenadas para dibujar y los avisos. Las interfaces consumen ese objeto.
+
+\subsubsection{Datos comunes para las interfaces}
+
+En \texttt{RouteResult}, \texttt{nodes} dice en qué orden se viaja y \texttt{geometry} ubica esos nodos para el mapa web. \texttt{distance\_m} y \texttt{duration\_s} alimentan las métricas. El resultado también conserva el grafo, que permite a la salida de terminal consultar nombres de calles y al renderizador del PNG recuperar geometrías de tramos. Las advertencias acompañan los números para que una alternativa quede visible.
+
+\subsubsection{Flujo integrado y responsabilidad de los componentes}
+
+Para la solicitud Plaza Norte--UNI, la precarga obtiene el grafo y puede dejar calculados ambos ajustes. Si la solicitud final conserva la misma caja, se reutiliza el grafo. Si coinciden también los puntos, se reutilizan los ajustes. Si cambia un extremo dentro de la misma caja, se vuelven a calcular los ajustes.
+
+El proveedor obtiene la red y sabe encontrar un nodo cercano. El perfil decide si una arista es transitable y cuánto cuesta. El buscador elige el camino. El planificador reúne los resultados parciales en un objeto con el que las interfaces pueden trabajar. Por ejemplo, si se cambia A* por Dijkstra, el planificador sigue entregando el grafo y el perfil mediante \texttt{bind} y pide la ruta mediante \texttt{find\_path}.
+
+Con el mismo grafo, los mismos extremos y el mismo perfil, cambiar la velocidad media cambia la duración estimada. La velocidad se aplica después de la búsqueda y el coste de las aristas se mantiene.
+
+El tema 4 describe cómo las interfaces utilizan el \texttt{RouteResult} para presentar los resultados.
+\end{document}

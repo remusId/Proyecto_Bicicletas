@@ -13,9 +13,10 @@ dependencies = [
     "networkx>=3.2",
     "requests>=2.31",
     "folium>=0.16",
-    "streamlit>=1.38",
+    "streamlit>=1.52",
     "streamlit-folium>=0.22",
     "scipy>=1.13",
+    "shapely>=2.1",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,9 @@ proyecto-poo = "app.ui.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"app.services" = ["natural_earth_land.geojson.gz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

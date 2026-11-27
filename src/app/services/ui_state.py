@@ -1,7 +1,6 @@
-"""Persistencia local de la vista del mapa."""
+"""Estado de la vista del mapa y escritura atómica de archivos JSON."""
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -31,22 +30,3 @@ class MapView:
     def __post_init__(self) -> None:
         if type(self.zoom) is not int or not 1 <= self.zoom <= 19:
             raise ValueError("El zoom debe ser un entero entre 1 y 19.")
-
-
-class ViewStore:
-    def __init__(self, path: Path | None = None) -> None:
-        local = os.getenv("LOCALAPPDATA")
-        default = (
-            Path(local) / "RutasCiclistas" if local else Path.home() / ".config/rutas-ciclistas"
-        )
-        self.path = path or Path(os.getenv("APP_UI_STATE", str(default / "ui_state.json")))
-
-    def load(self, fallback: MapView) -> MapView:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            return MapView(Coordinate(data["lat"], data["lon"]), data["zoom"])
-        except (OSError, ValueError, TypeError, KeyError):
-            return fallback
-
-    def save(self, view: MapView) -> None:
-        write_json(self.path, {"lat": view.center.lat, "lon": view.center.lon, "zoom": view.zoom})

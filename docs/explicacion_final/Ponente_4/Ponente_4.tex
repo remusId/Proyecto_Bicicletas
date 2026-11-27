@@ -1,0 +1,170 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+
+\title{Rutas ciclistas sobre OpenStreetMap\\Informe técnico}
+\author{Ponente 4 de 4 · Proyecto Final de Programación Orientada a Objetos}
+\date{}
+
+\begin{document}
+\maketitle
+\setcounter{section}{3}
+\section{Interfaces, visualización y distribución}
+
+\subsection{Datos del planificador y representación de la ruta}
+
+En el tema anterior, el planificador ajustó Plaza Norte y la UNI a la red vial y pidió al buscador un camino entre esos nodos. Al terminar, devuelve un \texttt{RouteResult}. A partir de ese objeto se puede representar la ruta sin volver a buscarla.
+
+El grafo guarda las conexiones entre nodos y la posición geográfica de cada uno. Si A* devuelve \(A\to C\to D\), los identificadores indican \textbf{en qué orden} se recorren los puntos. Para saber \textbf{dónde} dibujarlos, el planificador consulta la latitud y la longitud de \(A\), \(C\) y \(D\) en el grafo y guarda esas coordenadas ordenadas en \texttt{geometry}. Así se forma una \emph{polilínea}, un dibujo que une primero \(A\) con \(C\) y después \(C\) con \(D\). Cuando un tramo guarda puntos intermedios, su geometría puede conservar la curva de la calle.
+
+Si se usa Overpass, los identificadores, las coordenadas y las vías llegan como datos estructurados. El proveedor usa la lista de nodos de cada vía para construir las conexiones del grafo. Así, el buscador puede calcular el recorrido a partir de números y relaciones entre nodos, sin interpretar una imagen.
+
+El mismo resultado incluye la distancia, la duración estimada y los avisos. Estos valores describen el recorrido, mientras que las coordenadas y su orden determinan dónde se dibuja.
+
+\subsection{Interfaz web y visualización interactiva}
+Desde la raíz, con el proyecto instalado en el entorno, ejecuta el siguiente comando.
+
+\begin{Codigo}[numbers=none]
+streamlit run src/app/ui/streamlit_app.py
+\end{Codigo}
+
+Streamlit inicia un servidor local y muestra la dirección que se abre en el navegador. El usuario elige los extremos y solicita el cálculo. En \texttt{streamlit\_app.py}, \texttt{\_calculate} espera a que la red esté preparada, llama a \texttt{plan\_with\_alternatives} y guarda el \texttt{RouteResult} en \texttt{st.session\_state["route\_result"]}. El estado de la sesión conserva ese valor entre ejecuciones de la pantalla.
+
+El panel de resultados lee ese objeto para mostrar las métricas y se lo pasa a \texttt{MapRenderer}. El renderizador toma \texttt{geometry} y pasa sus pares de latitud y longitud a Folium. El mapa base de OpenStreetMap muestra las calles y Folium dibuja encima una capa con la ruta calculada. Ambas capas coinciden porque sus elementos se ubican mediante coordenadas geográficas.
+
+\textbf{Antes del fragmento (líneas 1--30).} El módulo importa Folium y define \texttt{MapRenderer.render}. Ese método puede recibir origen, destino, resultado, centro y zoom. Primero elige un centro y construye un mapa base de OpenStreetMap. A la altura del fragmento, \texttt{fmap} es ese mapa con su vista inicial.
+
+La condición comprueba que haya resultado y geometría. Esto permite reutilizar el método tanto para el mapa que recibe clics como para el mapa que ya puede dibujar la ruta. Los puntos del resultado se pasan a Folium como pares de latitud y longitud.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/ui/map_renderer.py} · líneas 31--39.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=31]
+        if result is not None and result.geometry:
+            locations = [(point.lat, point.lon) for point in result.geometry]
+            folium.PolyLine(
+                locations,
+                color="#1565c0",
+                weight=6,
+                opacity=0.85,
+                tooltip="Ruta ciclista",
+            ).add_to(fmap)
+\end{Codigo}
+\end{minipage}\par
+
+La interfaz también usa propiedades del resultado como la distancia en kilómetros y la duración en minutos. El usuario puede mover el mapa y acercarse a la línea sin volver a ejecutar A* para cada movimiento.
+
+\subsection{Interfaz de terminal y exportación PNG}
+El siguiente comando reproduce las coordenadas y el perfil del caso web.
+
+\begin{Codigo}[numbers=none]
+python -m app --origin=-12.00630,-77.05879 --dest=-12.01972,-77.04861 --provider overpass --profile bike --algorithm astar --plot-out route.png --no-show
+\end{Codigo}
+
+\textbf{Antes del fragmento (líneas 1--74).} El módulo importa sus dependencias y define \texttt{CliApp}. \texttt{run} lee los argumentos y construye los ajustes con el proveedor, el perfil, el algoritmo y los límites elegidos. Distingue una consulta de lugares de un cálculo de ruta. Para la segunda opción convierte los extremos a coordenadas, comprueba que sea razonable buscar una conexión terrestre y ajusta el área local cuando corresponde.
+
+Al llegar a la línea 75, las coordenadas y los ajustes están listos. El código puede crear los objetos concretos y entregarlos al planificador. La caché permite reutilizar un grafo. La llamada posterior a \texttt{prefetch} prepara la red y los ajustes que usará la búsqueda.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/ui/cli.py} · líneas 75--83.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=75]
+            cache = GraphCache(settings.cache_dir, enabled=settings.use_cache)
+            provider = GraphProviderFactory.create(settings.provider, cache, settings)
+            profile = profile_from_name(settings.profile)
+            pathfinder = PathFinderFactory.create(settings.algorithm)
+            planner = RoutePlanner(provider, profile, pathfinder, settings)
+            self._progress(0, "Preparando red ciclista (caché o descarga)…")
+            planner.prefetch(origin, dest)
+            self._progress(1, "Red lista. Calculando ruta…")
+            result = planner.plan_with_alternatives(origin, dest)
+\end{Codigo}
+\end{minipage}\par
+
+La variable \texttt{result} recibe el valor devuelto por el planificador en esa ejecución. La CLI lee la distancia, la duración y los nodos expandidos para imprimir el resumen. Si la exportación está activada, pasa el mismo resultado al renderizador de \texttt{visualization/plotter.py}. Este usa el grafo y los nodos ordenados para recuperar la geometría disponible de los tramos. Convierte las coordenadas geográficas a posiciones en un plano y usa Matplotlib para dibujar la red y la ruta. Finalmente guarda la figura como \texttt{route.png}, una imagen fija. En el ejemplo, \texttt{--no-show} permite guardar el archivo sin abrir el visor.
+
+\subsection{Construcción y distribución del ejecutable para Windows}
+
+Compartir la carpeta completa obligaría a la otra persona a conseguir Python, instalar las dependencias y ejecutar los archivos desde el entorno adecuado. Si el objetivo es distribuir la aplicación para que se abra con doble clic en Windows, conviene entregar un solo ejecutable con el intérprete, las bibliotecas y los recursos que necesita. La carpeta del proyecto queda como material de desarrollo y el \texttt{.exe} funciona como archivo de distribución.
+
+\subsubsection{Proceso de construcción con PyInstaller}
+La construcción parte del proyecto Python. El script de PowerShell \texttt{compilar\_windows.ps1} ejecuta PyInstaller con el intérprete de \texttt{.venv}. Toma \texttt{desktop\_entry.py} como punto de entrada. Ambos archivos están en \texttt{scripts/}.
+
+El ejecutable se genera en \nolinkurl{dist/escritorio/RutasCiclistas.exe}.
+
+\textbf{Punto de partida del fragmento.} El recorte empieza en la primera línea del script. Se ejecuta desde PowerShell con el entorno del proyecto disponible. Primero recibe una carpeta de salida y calcula la raíz a partir de la ubicación del script. Luego se mueve a esa raíz para que las rutas relativas, como \texttt{src} y \texttt{.venv}, apunten a los archivos correctos. Con eso preparado, el comando de PyInstaller indica el punto de entrada y qué recursos deben viajar dentro del paquete.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{scripts/compilar_windows.ps1} · líneas 1--15.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=1]
+param([string]$OutputDirectory = 'dist/escritorio')
+
+$ErrorActionPreference = 'Stop'
+$Project = Split-Path -Parent $PSScriptRoot
+Push-Location $Project
+try {
+    $WebSource = Join-Path $Project 'src/app/ui/streamlit_app.py'
+    & '.\.venv\Scripts\python.exe' -m PyInstaller --noconfirm --onefile --windowed `
+        --name RutasCiclistas --specpath build --workpath build --distpath $OutputDirectory `
+        --paths src --collect-all streamlit --collect-all streamlit_folium `
+        --collect-data app.services `
+        --hidden-import app.ui.streamlit_app `
+        --recursive-copy-metadata streamlit --copy-metadata osmnx `
+        --add-data "${WebSource}:web" scripts/desktop_entry.py
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar RutasCiclistas.exe.' }
+\end{Codigo}
+\end{minipage}\par
+
+\begin{itemize}
+\item \texttt{--onefile} concentra la distribución en un ejecutable y \texttt{--windowed} hace que se abra sin consola. PyInstaller incluye el intérprete de Python y las dependencias que necesita el programa.
+\item \texttt{--paths src} ayuda a localizar el paquete \texttt{app}. Las opciones que recopilan datos, módulos y metadatos incluyen los recursos de Streamlit y Folium y los datos terrestres de la aplicación.
+\item \texttt{--add-data} incluye el archivo de la interfaz dentro de \texttt{web/}. El lanzador lo usa para iniciar Streamlit desde el paquete.
+\end{itemize}
+
+\subsubsection{Arranque del servidor desde el ejecutable}
+\texttt{desktop\_entry.py} detecta si está empaquetado y elige el script web de la ubicación correspondiente. Configura el servicio en \texttt{127.0.0.1}, elige un puerto y arranca Streamlit. Una vez listo el servidor, abre el navegador. Si la aplicación ya está ejecutándose, el lanzador intenta reutilizar la instancia. Por eso hacer doble clic en el EXE termina mostrando la misma interfaz web. Las búsquedas de lugares, los grafos que falten en caché y el mapa base siguen dependiendo de Internet.
+
+\end{document}

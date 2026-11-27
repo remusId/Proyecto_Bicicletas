@@ -1,0 +1,9 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}El planificador compone los objetos}{2}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Validar y preparar la red}{2}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Ajustar los extremos y pedir una ruta}{4}{subsection.1.2}%
+\contentsline {section}{\numberline {2}De los formularios al mapa en \texttt {ui/}}{7}{section.2}%
+\contentsline {subsection}{\numberline {2.1}StreamlitApp conserva el estado de la interacción}{7}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Nominatim convierte nombres en objetos Place}{8}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Una Future coordina la precarga}{8}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}MapRenderer consume el resultado}{9}{subsection.2.4}%

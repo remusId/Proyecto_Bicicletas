@@ -1,0 +1,7 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Leer el grafo desde \texttt {routing/}}{2}{section.1}%
+\contentsline {subsection}{\numberline {1.1}PathFinder fija el contrato de búsqueda}{2}{subsection.1.1}%
+\contentsline {section}{\numberline {2}Cambiar la política de coste con \texttt {CostProfile}}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Ejemplo para explicar coste frente a distancia}{4}{subsection.2.1}%
+\contentsline {section}{\numberline {3}Seguir el código real de A*}{4}{section.3}%
+\contentsline {section}{\numberline {4}Reutilización por herencia y selección por fábrica}{6}{section.4}%

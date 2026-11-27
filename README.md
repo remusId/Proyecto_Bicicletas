@@ -17,6 +17,10 @@ perfiles de coste, dos algoritmos, interfaz Streamlit/Folium y CLI.
 - Caché en disco por bbox redondeado + backend + perfil, y respeto de
   `osmnx.settings.use_cache`.
 - Reintentos Overpass con backoff exponencial para timeout, 429 y 5xx (máximo 3).
+- Comprobación geográfica sin conexión con los
+  [polígonos terrestres 1:50 m de Natural Earth 5.1.2](https://github.com/nvkelso/natural-earth-vector/blob/v5.1.2/geojson/ne_50m_land.geojson),
+  de dominio público. Las islas pequeñas, los pasos costeros dudosos y las
+  desconexiones locales se resuelven con el grafo vial cuando hay datos disponibles.
 - Visualización Folium con ruta, origen, destino, métricas y atribución
   «© OpenStreetMap contributors».
 
@@ -24,14 +28,17 @@ perfiles de coste, dos algoritmos, interfaz Streamlit/Folium y CLI.
 
 ### Para compartir en Windows x64
 
-Entrega solo `RutasCiclistas.exe` de la carpeta de distribución. Si tienes
-`dist/actualizado/RutasCiclistas.exe`, comparte esa copia. La persona que lo recibe hace doble clic
+Comparte el ejecutable generado en `dist/escritorio/RutasCiclistas.exe`.
+La persona que lo recibe hace doble clic
 y la app se abre en el navegador. Python y las dependencias vienen incluidos.
 El mapa base, la búsqueda y la descarga inicial de grafos necesitan Internet.
 El primer arranque puede tardar mientras se extraen los archivos del ejecutable.
+Si vuelves a abrir el ejecutable, se abre la instancia que ya está en marcha.
+Para cerrar el servidor local, pulsa **Salir de la aplicación**. Si cierras
+todas sus pestañas, el servidor se detiene tras aproximadamente un minuto.
 
 Para generar el ejecutable desde el código, instala PyInstaller en el entorno
-de desarrollo y ejecuta este script desde PowerShell:
+de desarrollo, cierra la instancia abierta y ejecuta este script desde PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller
@@ -40,15 +47,13 @@ de desarrollo y ejecuta este script desde PowerShell:
 
 ### Desde el código fuente
 
-En Windows, haz doble clic en `lanzar_silencioso.vbs` o en `iniciar_app.bat`.
+En Windows, haz doble clic en `nereo.vbs` o en `iniciar_app.bat`.
 El lanzador prepara el entorno si hace falta y abre el navegador cuando Streamlit
-responde. Usa el puerto 8501 si está libre y elige otro si está ocupado.
+responde en un puerto local disponible.
 La primera instalación necesita Python 3.11 o superior, el lanzador `py` y conexión a Internet.
 
-El mapa recuerda centro y zoom al recargar. Guarda la vista en
-`%LOCALAPPDATA%\RutasCiclistas\ui_state.json` o en
-`~/.config/rutas-ciclistas/ui_state.json` cuando no hay `LOCALAPPDATA`.
-Define `APP_UI_STATE` para indicar otra ubicación.
+Cada sesión comienza en Lima con coordenadas predefinidas. El centro y el zoom
+se mantienen en memoria durante la sesión. La vista del mapa no se guarda en disco.
 
 ## Buscar lugares
 
@@ -136,8 +141,10 @@ streamlit run src/app/ui/streamlit_app.py
 4. La app muestra distancia, tiempo estimado, nodos expandidos, backend,
    distancias de snap, avisos y el mapa con la ruta.
 
-La primera sesión abre en Madrid. Puedes desplazar el mapa y ajustar el zoom.
+Puedes desplazar el mapa y ajustar el zoom.
 El área se ajusta automáticamente a los dos puntos y al margen configurado.
+La web admite descargas de hasta 2500 km² y 250 km por lado. Para recorridos
+largos, elige puntos intermedios y calcula tramos locales.
 La barra indica cuándo se está preparando la red y cuándo se calcula la ruta.
 
 ## Uso: CLI
@@ -241,9 +248,9 @@ pytest -m network -q
   `LAT,LON`.
 - No hay instrucciones giro a giro, elevación, tráfico en vivo ni perfil de
   altimetría.
-- Las áreas grandes pueden tardar más o exceder el tiempo de espera del proveedor.
-  La CLI muestra el progreso en la salida de errores y admite un límite manual
-  con `--max-area-km2` o `APP_MAX_AREA_KM2`.
+- Las descargas demasiado grandes se detectan antes de consultar el proveedor.
+  La CLI aplica los límites de la web al ajustar el área automáticamente y
+  permite fijar un límite manual con `--max-area-km2` o `APP_MAX_AREA_KM2`.
 - La disponibilidad depende de OSMnx, Overpass y de la conexión a Internet.
 - Si el snap supera 200 m se avisa; solo se rechaza si se configura
   `APP_MAX_SNAP_M`. El snap ignora los nodos sin ninguna arista transitable por

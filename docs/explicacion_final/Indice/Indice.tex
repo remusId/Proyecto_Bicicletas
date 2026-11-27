@@ -1,0 +1,127 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage{xcolor}
+\definecolor{navyreport}{HTML}{13294B}
+\usepackage[margin=23mm]{geometry}
+\title{Índice general}
+\author{}
+\date{}
+\begin{document}
+\renewcommand{\labelenumii}{\theenumi.\arabic{enumii}}
+\maketitle
+\section*{Introducción}
+
+El proyecto calcula rutas ciclistas sobre OpenStreetMap. La solicitud de Plaza Norte a la Universidad Nacional de Ingeniería (UNI) sirve como caso común para seguir los datos desde la entrada hasta las salidas.
+
+El árbol muestra las carpetas de la raíz y detalla los subpaquetes y archivos seleccionados. Los elementos en \textbf{\textcolor{navyreport}{azul marino}} delimitan el alcance de la exposición. El número indica el ponente responsable de cada grupo.
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{0.88}
+\begin{tabular}{@{}l@{}}
+\texttt{\textbf{\textcolor{navyreport}{Proyecto\_Final\_POO/}}}\\
+\hspace*{0em}\texttt{\textbar-- .cache/}\\
+\hspace*{0em}\texttt{\textbar-- .git/}\\
+\hspace*{0em}\texttt{\textbar-- .pytest\_cache/}\\
+\hspace*{0em}\texttt{\textbar-- .ruff\_cache/}\\
+\hspace*{0em}\texttt{\textbar-- .venv/}\\
+\hspace*{0em}\texttt{\textbar-- .vscode/}\\
+\hspace*{0em}\texttt{\textbar-- build/}\\
+\hspace*{0em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{dist/}}} \quad (Ponente 4)\\
+\hspace*{1.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{escritorio/}}}\\
+\hspace*{3em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{RutasCiclistas.exe}}}\\
+\hspace*{0em}\texttt{\textbar-- docs/}\\
+\hspace*{0em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{scripts/}}} \quad (Ponente 4)\\
+\hspace*{1.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{compilar\_windows.ps1}}}\\
+\hspace*{1.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{desktop\_entry.py}}}\\
+\hspace*{0em}\texttt{\textbar-- skills/}\\
+\hspace*{0em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{src/}}}\\
+\hspace*{1.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{app/}}}\\
+\hspace*{3em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{domain/}}} \quad (Ponente 1)\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{models.py}}}\\
+\hspace*{3em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{providers/}}}\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{base.py}}}\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{factory.py}}}\\
+\hspace*{3em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{routing/}}} \quad (Ponente 2)\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{profile.py}}}\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{astar.py}}}\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{dijkstra.py}}}\\
+\hspace*{3em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{services/}}} \quad (Ponente 3)\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{planner.py}}}\\
+\hspace*{3em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{ui/}}} \quad (Ponente 4)\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{streamlit\_app.py}}}\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{map\_renderer.py}}}\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{cli.py}}}\\
+\hspace*{3em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{visualization/}}}\\
+\hspace*{4.5em}\texttt{\textbar-- \textbf{\textcolor{navyreport}{plotter.py}}}\\
+\hspace*{0em}\texttt{`-- tests/}\\
+\end{tabular}
+\end{center}
+
+Los archivos \textbf{\textcolor{navyreport}{\texttt{nereo.vbs}}} y \textbf{\textcolor{navyreport}{\texttt{iniciar\_app.bat}}}, ubicados en la raíz, se analizan en el tema 4.
+
+El informe sigue el orden de datos, búsqueda, integración y presentación.
+\clearpage
+\begin{enumerate}
+\item \textbf{Datos geográficos y adquisición de la red vial} (Ponente 1)
+  \begin{enumerate}
+    \item Fundamentos geográficos y arquitectura de proveedores
+    \item Validación de los datos de entrada
+    \item Delimitación del área de descarga
+    \item Adquisición de la red y selección del proveedor
+  \end{enumerate}
+\item \textbf{Modelado de costes y búsqueda de caminos} (Ponente 2)
+  \begin{enumerate}
+    \item Fundamentos de la búsqueda en grafos ponderados
+    \item Implementación del perfil ciclista
+    \item Exploración con A* y Dijkstra
+    \item Reconstrucción del camino y cálculo de distancia
+  \end{enumerate}
+\item \textbf{Integración del cálculo y planificación de rutas} (Ponente 3)
+  \begin{enumerate}
+    \item Fundamentos de la planificación de rutas
+    \item Preparación de la red y ajuste de los extremos
+    \item Búsqueda, alternativas y consolidación del resultado
+  \end{enumerate}
+\item \textbf{Interfaces, visualización y distribución} (Ponente 4)
+  \begin{enumerate}
+    \item Fundamentos de ejecución y presentación
+    \item Flujo común de las interfaces y sus salidas
+    \item Interfaz web y visualización interactiva
+    \item Interfaz de terminal y exportación PNG
+    \item Construcción y distribución del ejecutable para Windows
+  \end{enumerate}
+\end{enumerate}
+
+\bigskip
+\noindent\textbf{Reparto en palabras simples}
+\begin{itemize}
+\item \textbf{Ponente 1.} Explica cómo empieza el pedido del usuario. El programa ubica el origen y el destino, determina qué zona necesita y obtiene las calles en forma de grafo.
+\item \textbf{Ponente 2.} Explica qué hace el buscador con esa red. Valora los tramos, compara las opciones y encuentra un camino con A* o Dijkstra.
+\item \textbf{Ponente 3.} Explica cómo se conectan el pedido y el cálculo. El planificador ajusta los puntos a la red, llama al buscador y reúne la ruta y sus métricas.
+\item \textbf{Ponente 4.} Muestra cómo se usa el programa y dónde se ve el resultado. Cubre el mapa web, el resumen de terminal, el PNG y el ejecutable de Windows.
+\end{itemize}
+\end{document}

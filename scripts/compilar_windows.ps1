@@ -1,11 +1,14 @@
+param([string]$OutputDirectory = 'dist/escritorio')
+
 $ErrorActionPreference = 'Stop'
 $Project = Split-Path -Parent $PSScriptRoot
 Push-Location $Project
 try {
     $WebSource = Join-Path $Project 'src/app/ui/streamlit_app.py'
     & '.\.venv\Scripts\python.exe' -m PyInstaller --noconfirm --onefile --windowed `
-        --name RutasCiclistas --specpath build --workpath build --distpath dist `
+        --name RutasCiclistas --specpath build --workpath build --distpath $OutputDirectory `
         --paths src --collect-all streamlit --collect-all streamlit_folium `
+        --collect-data app.services `
         --hidden-import app.ui.streamlit_app `
         --recursive-copy-metadata streamlit --copy-metadata osmnx `
         --add-data "${WebSource}:web" scripts/desktop_entry.py

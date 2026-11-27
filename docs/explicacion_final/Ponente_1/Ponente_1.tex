@@ -1,0 +1,163 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{navyreport}{HTML}{13294B}
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+
+\title{Rutas ciclistas sobre OpenStreetMap\\Informe técnico}
+\author{Ponente 1 de 4 · Proyecto Final de Programación Orientada a Objetos}
+\date{}
+
+\begin{document}
+\maketitle
+\setcounter{section}{0}
+\section{Datos geográficos y adquisición de la red vial}
+
+\subsection{Fundamentos geográficos y arquitectura de proveedores}
+
+\subsubsection{Representación y validación de coordenadas}
+Para calcular una ruta de Plaza Norte a la Universidad Nacional de Ingeniería (UNI), la aplicación necesita ubicar ambos lugares en el mapa. Si el usuario marca un punto, el mapa entrega su posición. También es posible indicar esa posición escribiendo sus coordenadas.
+
+Cada posición se expresa con dos números. La latitud indica cuánto se encuentra un punto al norte o al sur del ecuador. La longitud indica cuánto se encuentra al este o al oeste del meridiano de Greenwich. Por ejemplo, Plaza Norte se puede indicar como \texttt{(-12.00630, -77.05879)}. La aplicación recibe latitud primero y longitud después. Una herramienta que use coordenadas geográficas como ejes \(x,y\) puede esperar el orden inverso. Si se intercambian ambos valores, el punto puede quedar en otro lugar aunque los dos números estén dentro de los rangos válidos.
+
+Por eso una \texttt{Coordinate} concentra sus reglas en la construcción. A esas reglas que se conservan durante el uso normal del objeto se las llama \emph{invariantes}. La interfaz puede recibir texto y el proveedor puede recibir números, pero ambos llegan a la misma validación. Por ejemplo, Plaza Norte puede llegar como dos números escritos en texto. El resto del proyecto puede usar esos datos una vez convertidos sin volver a preguntar cómo estaban escritos.
+
+\subsubsection{Cobertura geográfica y representación de la red}
+Con el origen y el destino ubicados, la aplicación necesita conocer las calles que los conectan. Solicita los datos de OpenStreetMap dentro de un rectángulo que contiene ambos puntos. La caja agrega un margen porque una ruta puede salir del espacio comprendido entre ellos antes de volver hacia el destino. Un margen pequeño ahorra datos, pero puede dejar fuera un puente o una calle que conectaba dos zonas. Un margen más grande cubre más alternativas y aumenta el trabajo de descargar y explorar la red.
+
+Dentro de esa caja, el proyecto usa un \emph{multigrafo dirigido}. Dirigido significa que el sentido \(A\to B\) se registra por separado de \(B\to A\). Multi significa que puede haber más de una arista entre dos nodos, por ejemplo, cuando dos tramos ofrecen conexiones diferentes. Una arista puede llevar datos de longitud, tipo de vía y acceso para bicicleta. Esto permite distinguir entre una calle que figura en el mapa y una calle que el perfil puede usar.
+
+\subsubsection{Contrato común y selección de proveedores}
+Una vez delimitada la zona, el programa necesita solicitar sus calles y encontrar los nodos cercanos a los puntos elegidos. Esas son las dos operaciones de los proveedores de la red. El \emph{contrato} especifica qué datos recibe cada operación y qué devuelve. OSMnx y el proveedor que consulta Overpass directamente las resuelven de maneras distintas. El planificador puede usar cualquiera de los dos porque comparten ese contrato.
+
+La fábrica toma una decisión al inicio según la configuración. Después el planificador usa los métodos del contrato. Elegir el objeto concreto y usarlo son operaciones distintas. El polimorfismo se ve en la segunda, cuando la misma llamada ejecuta el método del proveedor elegido.
+
+\subsection{Validación de los datos de entrada}
+
+\texttt{domain/models.py} define el vocabulario de la aplicación. \texttt{Coordinate} representa un punto, \texttt{BoundingBox} delimita la zona que se va a descargar y \texttt{RouteResult} lleva la ruta y sus métricas a las interfaces. Si el mapa, la terminal y el proveedor usan el mismo objeto \texttt{Coordinate}, pueden contar con las mismas reglas sobre latitud y longitud.
+
+\textbf{Antes del fragmento (líneas 1--35).} El módulo importa herramientas matemáticas y define la función para medir distancias geográficas. Después declara \texttt{Coordinate} como una \texttt{dataclass} congelada. El constructor generado asigna los campos y llama a \texttt{\_\_post\_init\_\_}. Las primeras líneas de ese método intentan convertir ambos campos a \texttt{float} y traducen un fallo de conversión en un mensaje de validación.
+
+En la línea 36 ya existen dos números, \texttt{lat} y \texttt{lon}. Falta verificar que tengan un valor geográfico válido. Por ejemplo, \texttt{float} puede aceptar un texto que represente infinito, de modo que convertir primero y validar después cubre dos problemas distintos. Las asignaciones finales guardan los números normalizados durante la inicialización de la instancia congelada.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/domain/models.py} · líneas 36--43.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=36]
+        if not isfinite(lat) or not isfinite(lon):
+            raise ValueError("La latitud y la longitud deben ser finitas.")
+        if not -90.0 <= lat <= 90.0:
+            raise ValueError("La latitud debe estar entre -90 y 90.")
+        if not -180.0 <= lon <= 180.0:
+            raise ValueError("La longitud debe estar entre -180 y 180.")
+        object.__setattr__(self, "lat", lat)
+        object.__setattr__(self, "lon", lon)
+\end{Codigo}
+\end{minipage}\par
+
+\textbf{Encapsulación.} Durante la construcción, el objeto comprueba que sus coordenadas sean finitas y estén dentro de rango. Normaliza los dos atributos y, como la clase está congelada, quedan protegidos frente a reasignaciones. Por ejemplo, una latitud de 120 grados se rechaza al crear el punto.
+
+\clearpage
+\subsection{Delimitación del área de descarga}
+
+En el caso de estudio, Plaza Norte entra como \texttt{(-12.00630, -77.05879)} y la UNI como \texttt{(-12.01972, -77.04861)}. Cada par crea una instancia distinta de \texttt{Coordinate}. La caja usa los valores mínimos y máximos de los dos puntos y añade un margen para incluir calles por las que el recorrido podría desviarse.
+
+\textbf{Antes del fragmento (líneas 1--104).} Después de declarar las coordenadas y sus operaciones, el módulo define \texttt{BoundingBox} con cuatro límites. Su método \texttt{from\_points} recibe dos objetos \texttt{Coordinate}, valida el margen y obtiene los mínimos y máximos de latitud y longitud. También rechaza una separación longitudinal mayor de 180 grados porque esta consulta necesita una sola caja.
+
+El fragmento parte de esos cuatro extremos. Todavía falta convertir a grados el margen configurado en metros y sumarlo. El constructor que se invoca al final vuelve a comprobar el orden y el rango de la caja resultante.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/domain/models.py} · líneas 105--115.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=105]
+        mid_lat = radians((min_lat + max_lat) / 2.0)
+        lat_pad = degrees(margin_m / EARTH_RADIUS_M)
+        lon_pad = degrees(margin_m / (EARTH_RADIUS_M * max(cos(mid_lat), 1e-6)))
+
+        south = max(-90.0, min_lat - lat_pad)
+        north = min(90.0, max_lat + lat_pad)
+        west = min_lon - lon_pad
+        east = max_lon + lon_pad
+        if west < -180.0 or east > 180.0:
+            raise ValueError("El área cruza el meridiano 180; elige puntos más cercanos.")
+        return cls(south=south, west=west, north=north, east=east)
+\end{Codigo}
+\end{minipage}\par
+
+\texttt{lat\_pad} y \texttt{lon\_pad} convierten el margen de metros a grados, la unidad que se utiliza en la consulta. La longitud se corrige con la latitud media porque un grado de longitud cubre menos metros al alejarse del ecuador. El constructor de la caja comprueba que sus límites estén ordenados.
+
+\clearpage
+\subsection{Adquisición de la red y selección del proveedor}
+
+\texttt{providers/base.py} define dos operaciones: obtener el grafo y ajustar una coordenada al nodo más cercano. Una caja de Lima puede cargarse con OSMnx o con una consulta directa a Overpass. En ambos casos el planificador recibe una red dirigida con nodos, aristas y sentidos de circulación.
+
+\textbf{Antes del fragmento (líneas 1--22).} El módulo importa los dos proveedores, el tipo común, la caché y la configuración. La clase \texttt{GraphProviderFactory} expone el método de clase \texttt{create}. Recibe tres datos: el nombre del proveedor, un objeto de caché y los ajustes. Su tipo de retorno es \texttt{GraphProvider}, que es lo que espera quien solicita el proveedor.
+
+En la primera línea mostrada se normaliza el nombre para que las mayúsculas y los espacios externos no cambien la selección. Las opciones que siguen construyen el objeto y le pasan la configuración que necesita. En ese punto se prepara el proveedor. La descarga ocurre cuando se llama a \texttt{load\_graph}.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/providers/factory.py} · líneas 23--34.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=23]
+        normalized = name.strip().lower()
+        if normalized == "osmnx":
+            return OsmnxProvider(
+                cache,
+                network_type=settings.network_type,
+                use_cache=settings.use_cache,
+                user_agent=settings.user_agent,
+                requests_timeout_s=settings.overpass_timeout_s,
+                retries=settings.overpass_retries,
+            )
+        if normalized == "overpass":
+            return OverpassProvider.from_settings(cache, settings)
+\end{Codigo}
+\end{minipage}\par
+
+\textbf{Abstracción, herencia y polimorfismo.} La fábrica usa el nombre para crear el proveedor concreto. Ambos proveedores derivan de \texttt{GraphProvider}. Cuando el planificador llama a \texttt{load\_graph}, el objeto elegido ejecuta su propia implementación. 
+
+\textbf{Grafo resultante.} El proveedor recibe la caja para obtener la red y devuelve un grafo. En ese grafo, una intersección puede representarse como un nodo y un tramo entre nodos como una arista. Una calle de sentido único puede permitir \(A\to B\) sin permitir \(B\to A\). También pueden existir dos aristas distintas entre el mismo par de nodos. El buscador necesitará revisar cada salida y el perfil decidirá cuáles tienen un coste válido.
+
+El grafo adquirido contiene las aristas y sus atributos. Estos datos son la entrada para los perfiles de coste y los algoritmos del tema 2.
+\end{document}

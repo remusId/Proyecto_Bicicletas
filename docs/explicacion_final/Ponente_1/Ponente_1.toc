@@ -1,0 +1,11 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {section}{\numberline {1}Abrir la ponencia y ubicar el proyecto}{2}{section.1}%
+\contentsline {section}{\numberline {2}Encapsular los datos en \texttt {domain/}}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Coordinate valida la entrada al construir el objeto}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}BoundingBox convierte dos puntos en un área descargable}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Resultado y errores con tipos propios}{4}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Abstracción y polimorfismo en \texttt {providers/}}{6}{section.3}%
+\contentsline {subsection}{\numberline {3.1}GraphProvider y la fábrica}{6}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}OsmnxProvider delega y proyecta}{7}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}OverpassProvider construye el grafo}{8}{subsection.3.3}%
+\contentsline {section}{\numberline {4}Reutilizar grafos con \texttt {GraphCache}}{9}{section.4}%

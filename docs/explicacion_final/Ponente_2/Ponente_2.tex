@@ -1,0 +1,175 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+
+\title{Rutas ciclistas sobre OpenStreetMap\\Informe técnico}
+\author{Ponente 2 de 4 · Proyecto Final de Programación Orientada a Objetos}
+\date{}
+
+\begin{document}
+\maketitle
+\setcounter{section}{1}
+\section{Modelado de costes y búsqueda de caminos}
+
+\subsection{Fundamentos de la búsqueda en grafos ponderados}
+
+\subsubsection{Función de coste y criterio de optimización}
+La red obtenida de OpenStreetMap puede ofrecer más de una ruta entre dos lugares. Para elegir entre una avenida directa y un recorrido algo más largo por ciclovías, el programa necesita definir qué valora. Asigna un número a cada tramo, llamado \emph{coste}, y suma los costes de los tramos de cada camino. El perfil de distancia usa los metros de cada tramo. El perfil ciclista puede aumentar el coste de una avenida para favorecer las ciclovías. La distancia física se sigue calculando en metros.
+
+\subsubsection{Infinito de coma flotante como valor centinela}
+Durante la búsqueda aparecen dos situaciones para las que falta un coste utilizable. Hay tramos que el perfil prohíbe y hay nodos a los que todavía no se ha encontrado una manera de llegar. Python permite representar el infinito positivo con \texttt{math.inf}. Se trata de un valor especial que cabe en memoria y tiene reglas de comparación. Como cualquier coste finito es menor, el programa puede usarlo como \emph{centinela}, es decir, como marcador de una condición especial.
+
+Aquí cumple dos papeles. Si el perfil devuelve infinito para una arista, el bucle comprueba \texttt{math.isfinite} y la salta. Si un vecino todavía no tiene coste guardado, \texttt{g\_score.get} usa infinito como valor inicial y así cualquier llegada finita puede mejorar directamente ese registro. En el primer caso, la arista queda excluida. En el segundo, el nodo todavía está por descubrir. Conviene distinguir estos usos al señalar las dos líneas del algoritmo.
+
+\subsubsection{Cola de prioridad y heurística}
+Al explorar desde un cruce, el algoritmo puede descubrir varios caminos parciales al mismo tiempo. Necesita decidir cuál examinar primero. Guarda los nodos pendientes en una cola de prioridad, que devuelve el de menor prioridad numérica aunque haya llegado más tarde. A* calcula esa prioridad con \(f=g+h\). \(g\) es lo que ya cuesta llegar al nodo y \(h\) estima lo que falta. La estimación sirve de cota inferior si las longitudes de los tramos respetan la separación geográfica entre sus extremos y la escala de la estimación no supera el factor mínimo del perfil.
+
+Dijkstra ordena solo por \(g\). Poner \(h=0\) hace que la misma cola y la misma regla de actualización funcionen con ese criterio. La cantidad de nodos que se exploran puede cambiar aunque se preserve el coste óptimo. Si hay empate, incluso puede cambiar el camino concreto que se devuelve.
+
+\clearpage
+
+\subsection{Implementación del perfil ciclista}
+
+El perfil asigna un coste a las aristas transitables del grafo. El buscador usa esos costes para determinar qué camino satisface el criterio elegido.
+
+En \texttt{profile.py}, \texttt{CostProfile} define la operación \texttt{edge\_cost}. \texttt{ShortestProfile} devuelve la longitud de un tramo transitable. \texttt{BikeFriendlyProfile} la pondera según el tipo de vía. Si la vía está prohibida para el perfil, su coste es infinito. Ambas clases ofrecen la misma operación y la búsqueda usa el objeto que recibió. Este es el patrón Estrategia.
+
+\textbf{Antes del fragmento (líneas 1--155).} El archivo define utilidades para leer etiquetas de OpenStreetMap y convertir la longitud de una arista a número. Después declara \texttt{CostProfile}, implementa el perfil de distancia y define el perfil ciclista. Este último prepara la tabla de multiplicadores y las exclusiones en el constructor. Los multiplicadores deben ser finitos y al menos uno, para que el perfil no abarate un tramo por debajo de su longitud física.
+
+Al entrar a \texttt{edge\_cost}, \texttt{edge\_data} contiene los atributos de un solo tramo. El método primero comprueba si el perfil permite usarlo. Luego consulta su longitud y busca el multiplicador del tipo de vía. Si falta un factor específico, usa el valor por defecto.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/routing/profile.py} · líneas 156--165.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=156]
+    def edge_cost(self, edge_data: Mapping[str, Any]) -> float:
+        """Aplica el multiplicador del tipo de vía a la longitud."""
+        if self._forbidden(edge_data):
+            return math.inf
+        length = _edge_length(edge_data)
+        if not math.isfinite(length):
+            return math.inf
+        highway = _tag_text(edge_data.get("highway"))
+        multiplier = self._multipliers.get(highway, self._multipliers["_default"])
+        return length * multiplier
+\end{Codigo}
+\end{minipage}\par
+
+El ejemplo utiliza tres nodos, \(A\), \(X\) y \(B\). La avenida directa de \(A\) a \(B\) mide 100 m y su factor es 1,55. La alternativa por \(X\) usa dos tramos de ciclovía de 60 m. El perfil de distancia elige la avenida por \(100<120\). El perfil ciclista elige las ciclovías por \(120<155\).
+
+\subsection{Exploración con A* y Dijkstra}
+
+\textbf{Antes del fragmento (líneas 1--68).} El archivo importa las herramientas de la cola y define el buscador. Al comenzar, \texttt{find\_path} recupera el grafo y el perfil, verifica que existan los dos nodos y resuelve el caso de origen igual a destino. Obtiene la coordenada del destino, valida la escala de la heurística e inicializa el coste del origen en cero, el diccionario de predecesores y la cola.
+
+El bucle principal ya extrajo un nodo de la cola y lo registró como expandido. Si era el destino, se detuvo. Cuando llega a la línea 69, \texttt{current} identifica el nodo que toca explorar y \texttt{g\_score[current]} contiene su coste acumulado. Ahora se examinan sus aristas salientes. El contador que acompaña a cada prioridad desempata sin obligar a comparar los identificadores de nodo.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/routing/astar.py} · líneas 69--78.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=69]
+            for neighbor, edge_data in self._out_edges(current):
+                edge_cost = profile.edge_cost(edge_data)
+                if not math.isfinite(edge_cost) or edge_cost < 0.0:
+                    continue
+                tentative = g_score[current] + edge_cost
+                if tentative < g_score.get(neighbor, math.inf):
+                    g_score[neighbor] = tentative
+                    came_from[neighbor] = (current, edge_data)
+                    priority = tentative + self._heuristic(neighbor, destination, scale)
+                    heapq.heappush(open_heap, (priority, next(counter), neighbor))
+\end{Codigo}
+\end{minipage}\par
+
+En \texttt{astar.py}, la cola saca el nodo con menor prioridad \(g+h\). \(g\) es el coste acumulado y \(h\) estima lo que falta a partir de la distancia haversine y la escala del perfil. La variable \texttt{tentative} representa el coste de llegar al vecino por la arista actual. Si llegar al vecino por esta arista mejora el coste conocido, se actualizan el coste, el predecesor y la cola. Al sacar el destino, el buscador reconstruye el camino siguiendo esos predecesores hacia atrás.
+
+\textbf{Ejemplo de exploración.} Con el perfil ciclista y \(h(X)=50\), desde \(A\) la cola deja \(X\) con prioridad 110 y \(B\) con 155. Al sacar \(X\), aparece una llegada a \(B\) con coste 120. Gana esa llegada y se reconstruye \(A\to X\to B\).
+
+\textbf{Antes del fragmento (líneas 1--16).} El archivo importa \texttt{AStarPathFinder}, declara una subclase y cambia el nombre que aparece en las métricas. El método heredado usa \texttt{self.\_heuristic} al colocar nodos en la cola. La subclase mantiene esa firma para que la búsqueda pueda llamarla con los mismos argumentos.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/routing/dijkstra.py} · líneas 17--18.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=17]
+    def _heuristic(self, node: NodeId, destination: Coordinate, scale: float) -> float:
+        return 0.0
+\end{Codigo}
+\end{minipage}\par
+
+\texttt{dijkstra.py} ofrece una subclase que redefine la heurística a cero. La búsqueda heredada invoca el método de la instancia, de modo que Dijkstra explora por coste acumulado. Con el mismo perfil ambos buscan el mismo coste mínimo. Pueden explorar cantidades distintas de nodos.
+
+\subsection{Reconstrucción del camino y cálculo de distancia}
+
+\textbf{Antes del fragmento (líneas 1--112).} La búsqueda ya validó los extremos, ejecutó el bucle de prioridad y registró en \texttt{came\_from} el predecesor y los datos del tramo de cada mejora. Si nunca se registró un coste para el destino, lanza un error. Si lo alcanzó, llama a \texttt{\_reconstruct} con origen, destino y ese diccionario. Justo antes del fragmento aparece la firma del método, que devuelve una secuencia de nodos y una distancia.
+
+\par\medskip
+\noindent\begin{minipage}{\linewidth}
+{\footnotesize\nolinkurl{src/app/routing/astar.py} · líneas 113--126.\par}
+\nopagebreak[4]
+\begin{Codigo}[firstnumber=113]
+        path: list[NodeId] = [dest]
+        distance_m = 0.0
+        current = dest
+        while current != origin:
+            previous, edge_data = came_from[current]
+            distance_m += edge_length_m(
+                edge_data,
+                node_coordinate(self.graph, previous),
+                node_coordinate(self.graph, current),
+            )
+            path.append(previous)
+            current = previous
+        path.reverse()
+        return tuple(path), distance_m
+\end{Codigo}
+\end{minipage}\par
+
+En el ejemplo, \texttt{came\_from[B]} apunta a \(X\) y \texttt{came\_from[X]} apunta a \(A\). El código empieza en \(B\), lee el tramo guardado para sumar su longitud y retrocede hasta \(A\). Al invertir la lista, obtiene el orden que puede usar el mapa. Guardar los datos de la arista permite sumar la longitud del tramo elegido aun cuando haya varias aristas entre los mismos nodos.
+
+La distancia expresa los metros que se recorren. El coste expresa la puntuación usada para elegir. Si el perfil ciclista eligiera una avenida de 100 m con factor 1,55, al resultado le corresponderían 100 m de distancia y 155 de coste. El tiempo estimado se calcula después con los metros y la velocidad.
+
+Si la arista \(X\to B\) se prohíbe para bicicletas, el perfil le asigna un coste infinito y el bucle la omite con \texttt{continue}. El camino directo pasa a ser la opción disponible si sigue permitido.
+
+El buscador opera con identificadores de nodos. El tema 3 describe cómo el planificador los obtiene a partir de las coordenadas y cómo entrega el resultado.
+\end{document}

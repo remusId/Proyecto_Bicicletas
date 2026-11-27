@@ -1,4 +1,4 @@
-"""Pruebas locales para la búsqueda, la vista y los diagnósticos."""
+"""Pruebas locales para la búsqueda y los diagnósticos."""
 
 from dataclasses import replace
 from unittest.mock import Mock
@@ -14,7 +14,6 @@ from app.routing.profile import profile_from_name
 from app.services.cache import GraphCache
 from app.services.diagnostics import explain_no_route
 from app.services.geocoder import TTL_S, NominatimGeocoder
-from app.services.ui_state import MapView, ViewStore
 
 
 def test_geocoder_parses_reuses_disk_cache_and_expires(tmp_path, monkeypatch):
@@ -55,20 +54,6 @@ def test_nominatim_plaza_norte_lima(tmp_path):
         "Plaza Norte, Lima"
     )
     assert places[0].coordinate.distance_to(Coordinate(-12.0063, -77.0588)) < 2000
-
-
-def test_view_persists_and_handles_invalid_data(tmp_path, monkeypatch):
-    target = tmp_path / "ui_state.json"
-    monkeypatch.setenv("APP_UI_STATE", str(target))
-    madrid = MapView(Coordinate(40.4168, -3.7038), 14)
-    lima = MapView(Coordinate(-12.01, -77.05), 16)
-    assert ViewStore().load(madrid) == madrid
-    ViewStore().save(lima)
-    assert ViewStore().load(madrid) == lima
-    target.write_bytes(b'{"lat": NaN, "lon": -77, "zoom": 16}')
-    assert ViewStore().load(madrid) == madrid
-    target.write_bytes(b"\xff")
-    assert ViewStore().load(madrid) == madrid
 
 
 def test_overpass_failover_is_sequential(tmp_path, monkeypatch, overpass_payload):

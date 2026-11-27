@@ -17,6 +17,7 @@ from app.routing.factory import PathFinderFactory
 from app.routing.profile import profile_from_name
 from app.services.cache import GraphCache
 from app.services.geocoder import NominatimGeocoder
+from app.services.land_connections import check_land_route
 from app.services.planner import RoutePlanner
 from app.visualization.plotter import RoutePlotter
 
@@ -62,6 +63,7 @@ class CliApp:
                 raise ValueError("Indica un origen y un destino por coordenadas o nombre.")
             origin = self._coordinate(args.origin, args.origin_place, geocoder)
             dest = self._coordinate(args.dest, args.dest_place, geocoder)
+            check_land_route(origin, dest)
             if args.max_area_km2 is None and os.getenv("APP_MAX_AREA_KM2") is None:
                 expanded = settings.with_area_for(origin, dest)
                 if expanded is not settings:

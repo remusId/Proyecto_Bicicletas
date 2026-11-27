@@ -18,6 +18,7 @@ from app.routing.astar import AStarPathFinder
 from app.routing.base import PathFinder, PathSearchResult
 from app.routing.dijkstra import DijkstraPathFinder
 from app.routing.profile import BikeFriendlyProfile, CostProfile, ShortestProfile
+from app.services.land_connections import check_land_route
 from app.services.planner import RoutePlanner
 
 
@@ -76,6 +77,50 @@ class FakePathFinder(PathFinder):
             elapsed_s=0.01,
             algorithm="fake",
         )
+
+
+@pytest.mark.parametrize("operation", ["prefetch", "plan", "plan_with_alternatives"])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    ("points", "reason"),
+    [
+        ((Coordinate(-12.0464, -77.0428), Coordinate(40.4168, -3.7038)), "agua"),
+        ((Coordinate(49.28, -123.12), Coordinate(-33.87, 151.21)), "agua"),
+        ((Coordinate(49.28, -123.12), Coordinate(39.9, 116.4)), "agua"),
+        ((Coordinate(40.71, -74.01), Coordinate(-33.92, 18.42)), "agua"),
+        ((Coordinate(39.9, 116.4), Coordinate(35.68, 139.69)), "agua"),
+        ((Coordinate(-33.87, 151.21), Coordinate(-37, 175)), "agua"),
+        ((Coordinate(64.5, -165.4), Coordinate(64.73, 177.51)), "agua"),
+        ((Coordinate(9, -79.5), Coordinate(4.71, -74.07)), "Darién"),
+    ],
+)
+def test_planner_reports_land_disconnection_without_loading_graph(
+    operation, reverse, points, reason
+):
+    provider = FakeProvider(nx.MultiDiGraph())
+    planner = RoutePlanner(provider, ShortestProfile(), AStarPathFinder(), Settings())
+    if reverse:
+        points = points[::-1]
+
+    with pytest.raises(NoRouteFoundError, match=f"No existe una ruta por tierra.*{reason}"):
+        getattr(planner, operation)(*points)
+
+    assert provider.load_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("origin", "dest"),
+    [
+        (Coordinate(30.04, 31.24), Coordinate(39.9, 116.4)),  # África y Asia
+        (Coordinate(55.68, 12.57), Coordinate(55.60, 13.00)),  # Puente de Øresund
+        (Coordinate(66, -178), Coordinate(64.73, 177.51)),  # Misma masa a ambos lados de 180°
+        (Coordinate(0, -140), Coordinate(39.9, 116.4)),  # Coordenada sin clasificar
+    ],
+)
+def test_geographic_check_leaves_possible_or_uncertain_connections_to_the_router(
+    origin, dest
+) -> None:
+    check_land_route(origin, dest)
 
 
 @pytest.mark.parametrize("successful_attempt", [1, 2, 3])

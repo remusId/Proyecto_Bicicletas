@@ -18,11 +18,38 @@ from app.domain.models import Coordinate, RouteResult
 from app.providers.factory import GraphProviderFactory
 from app.routing.factory import PathFinderFactory
 from app.routing.profile import profile_from_name
+from app.services import desktop_session
 from app.services.cache import GraphCache
 from app.services.geocoder import NominatimGeocoder
+from app.services.land_connections import check_land_route
 from app.services.planner import RoutePlanner
-from app.services.ui_state import MapView, ViewStore
+from app.services.ui_state import MapView
 from app.ui.map_renderer import MapRenderer
+
+_CLOSED_PAGE_SCRIPT = """
+export default function () {
+    const closedPage = `<!doctype html>
+<html lang="es"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rutas ciclistas · Aplicación cerrada</title>
+<style>
+  body { color-scheme: light dark; font: 1rem system-ui; margin: 3rem auto; padding: 0 1.5rem;
+         max-width: 34rem; }
+</style>
+<main><h1>Aplicación cerrada</h1>
+<p>Puedes cerrar esta pestaña. Para volver a usar Rutas ciclistas, abre el ejecutable.</p>
+</main></html>`;
+    window.location.replace(URL.createObjectURL(new Blob([closedPage], {type: "text/html"})));
+}
+"""
+
+
+def _map_coordinate(point: dict[str, Any]) -> Coordinate:
+    """Convierte las longitudes de las copias del mapa a su intervalo habitual."""
+    longitude = float(point["lng"])
+    if not -180 <= longitude <= 180:
+        longitude = (longitude + 180) % 360 - 180
+    return Coordinate(point["lat"], longitude)
 
 
 @st.cache_resource
@@ -82,11 +109,21 @@ class StreamlitApp:
             "Datos de OpenStreetMap. © OpenStreetMap contributors. "
             "Haz clic en el mapa para marcar origen y destino."
         )
+        shutdown = desktop_session.shutdown
+        if shutdown is not None and st.button("Salir de la aplicación"):
+            st.info("Cerrando la aplicación. Puedes cerrar esta pestaña.")
+            closed_page = st.components.v2.component(
+                "rutas_escritorio_cierre", js=_CLOSED_PAGE_SCRIPT
+            )
+            closed_page()
+            shutdown()
+            st.stop()
         settings = self._advanced_settings()
         self._init_state()
         if "map_view" not in st.session_state:
-            fallback = MapView(settings.default_center, min(settings.map_zoom, 19))
-            st.session_state["map_view"] = ViewStore().load(fallback)
+            st.session_state["map_view"] = MapView(
+                settings.default_center, min(settings.map_zoom, 19)
+            )
         self._map_click_panel(settings)
         self._result_panel(settings)
 
@@ -193,17 +230,20 @@ class StreamlitApp:
         if isinstance(map_output, dict) and map_output.get("center"):
             center = map_output["center"]
             with suppress(ValueError, TypeError, KeyError):
-                self._save_view(
-                    MapView(Coordinate(center["lat"], center["lng"]), map_output["zoom"])
+                st.session_state["map_view"] = MapView(
+                    _map_coordinate(center), map_output["zoom"]
                 )
         clicked = map_output.get("last_clicked") if isinstance(map_output, dict) else None
         if clicked:
-            clicked_pair = (float(clicked["lat"]), float(clicked["lng"]))
-            if clicked_pair != st.session_state["last_click"]:
-                st.session_state["last_click"] = clicked_pair
-                coordinate = Coordinate(lat=clicked_pair[0], lon=clicked_pair[1])
-                self._set_point(point_key, coordinate)
-                st.rerun()
+            try:
+                coordinate = _map_coordinate(clicked)
+            except (ValueError, TypeError, KeyError):
+                st.warning("No se pudo seleccionar ese punto. Haz clic de nuevo en el mapa.")
+            else:
+                if coordinate.as_tuple() != st.session_state["last_click"]:
+                    st.session_state["last_click"] = coordinate.as_tuple()
+                    self._set_point(point_key, coordinate)
+                    st.rerun()
 
         col_calc, col_clear = st.columns(2)
         calculate = col_calc.button(
@@ -224,8 +264,11 @@ class StreamlitApp:
             self._prefetch(settings, origin, dest)
             return
         try:
+            check_land_route(origin, dest)
             route_settings = settings.with_area_for(origin, dest)
-        except ValueError as exc:
+        except (RoutingError, ValueError) as exc:
+            st.session_state.pop("pending_calculation", None)
+            self._prefetch(settings, None, None)
             st.error(str(exc))
             return
         if route_settings.max_area_km2 > settings.max_area_km2:
@@ -268,18 +311,9 @@ class StreamlitApp:
         st.session_state[point_key] = coordinate
         st.session_state["route_result"] = None
 
-    @staticmethod
-    def _save_view(view: MapView) -> None:
-        if view != st.session_state["map_view"]:
-            st.session_state["map_view"] = view
-            try:
-                ViewStore().save(view)
-            except OSError:
-                st.warning("No se pudo guardar la vista del mapa en este equipo.")
-
     def _recenter(self, coordinate: Coordinate, zoom: int = 16) -> None:
         view = MapView(coordinate, zoom)
-        self._save_view(view)
+        st.session_state["map_view"] = view
         st.session_state["map_initial_view"] = view
         st.session_state["map_revision"] = st.session_state.get("map_revision", 0) + 1
         st.session_state["last_click"] = None

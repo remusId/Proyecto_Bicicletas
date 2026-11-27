@@ -1,0 +1,112 @@
+\documentclass[11pt,a4paper]{article}
+% Prefer XeLaTeX or LuaLaTeX; falls back safely under pdfTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else\ifLuaTeX
+  \usepackage{fontspec}
+  \usepackage[spanish,shorthands=off]{babel}
+  \setmainfont{Latin Modern Roman}
+  \IfFontExistsTF{DejaVu Sans Mono}
+    {\setmonofont{DejaVu Sans Mono}}
+    {\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+  \usepackage{lmodern}
+  \usepackage[spanish,shorthands=off]{babel}
+\fi\fi
+
+\usepackage[margin=23mm]{geometry}
+\usepackage{xcolor}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{navyreport}{HTML}{13294B}
+\definecolor{codegray}{HTML}{526173}
+\definecolor{codebg}{HTML}{EDF2F7}
+\DefineVerbatimEnvironment{Codigo}{Verbatim}{
+  fontsize=\small,breaklines,breakanywhere,numbers=left,
+  numbersep=8pt,xleftmargin=1.7em,rulecolor=\color{codegray},
+  frame=single,framerule=0.6pt,framesep=6pt,
+  fillcolor=\color{codebg},tabsize=4
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+
+\title{Conceptos preliminares\\De los datos de OpenStreetMap a una ruta dibujada}
+\author{Proyecto Final de Programación Orientada a Objetos}
+\date{}
+\begin{document}
+\maketitle
+
+\section{La red vial como datos}
+
+Para viajar en bicicleta de Plaza Norte a la UNI, primero hay que conocer las calles que conectan ambos lugares. El programa representa esas conexiones en un \textbf{grafo}, una estructura que guarda puntos y los enlaces entre ellos. Un \textbf{nodo} representa un punto concreto de la red, como una intersección o un punto de una calle. Tiene un identificador y coordenadas. Una \textbf{arista} representa un tramo entre dos nodos y puede guardar su longitud, el nombre de la calle, el tipo de vía y las restricciones de acceso.
+
+En una calle de sentido único, una arista de \(A\) a \(B\) permite avanzar de \(A\) hacia \(B\). Para permitir el regreso hace falta una arista en el sentido contrario. El proyecto usa un \emph{multigrafo dirigido}, que permite registrar ambos sentidos y guardar varios tramos distintos entre los mismos nodos.
+
+\subsection{OpenStreetMap, OSMnx y Overpass}
+
+OpenStreetMap almacena datos geográficos estructurados. Un elemento \texttt{node} contiene un identificador y coordenadas. Un elemento \texttt{way} referencia nodos en orden y puede incluir etiquetas como \texttt{highway}, \texttt{oneway} y \texttt{bicycle}. Al seguir dos identificadores consecutivos de una vía se obtiene un tramo. Cuando las vías comparten el nodo de una intersección, el programa tiene una referencia para conectar sus tramos. Con estos datos puede construir una red sin tener que interpretar los colores o las líneas de una imagen.
+
+\begin{description}
+\item[OSMnx] Es una biblioteca de Python. El proveedor del proyecto le solicita una red ciclista dentro de un rectángulo geográfico. OSMnx devuelve un grafo de NetworkX con nodos y aristas que ya incluyen atributos de la red. El proveedor proyecta el grafo para trabajar con coordenadas planas y conserva también la latitud y longitud.
+\item[Overpass] Es un servicio de consulta de datos de OpenStreetMap. El proveedor directo pide vías y los nodos que esas vías referencian. Recibe JSON con identificadores, coordenadas y etiquetas. El código del proyecto lee esos datos, construye el grafo, calcula las longitudes entre nodos consecutivos y crea las aristas en los sentidos permitidos.
+\end{description}
+
+Ambos proveedores entregan al planificador el mismo tipo de grafo. La aplicación puede así cambiar de proveedor y seguir utilizando la misma lógica para calcular una ruta.
+
+\clearpage
+\section{Cómo se elige el camino}
+
+El usuario puede marcar un punto dentro de un edificio, lejos de un cruce. El planificador asocia cada extremo a un nodo de la red. Luego el buscador necesita una forma de comparar los tramos entre esos nodos. El \emph{coste} de una arista es el valor que se suma al recorrerla. Puede ser su longitud o su longitud multiplicada por un factor según el tipo de vía. Los algoritmos del proyecto consideran aristas permitidas con costes finitos y no negativos.
+
+\subsection{Dijkstra y A*}
+
+\textbf{Dijkstra} empieza en el origen con coste cero. Guarda los nodos pendientes en una cola de prioridad y explora primero el de menor coste acumulado \(g\). Cuando pasar por el nodo actual mejora el coste conocido para un vecino, actualiza ese coste y registra desde qué nodo llegó. Con costes no negativos, puede terminar cuando extrae el destino con el menor coste de la cola.
+
+\textbf{A*} usa la misma idea y añade una estimación de lo que falta, llamada \emph{heurística} \(h\). Ordena la cola por \(f=g+h\). En el proyecto, \(h\) parte de la distancia geográfica directa al destino y se escala según el perfil. Para actuar como cota inferior, esa estimación debe ser compatible con las longitudes y costes de los tramos del grafo. Con una heurística consistente, como se espera bajo esas condiciones, A* puede terminar al extraer el destino y mantener el coste óptimo. El Dijkstra del proyecto reutiliza el buscador y fija \(h=0\).
+
+\subsection{Ejemplo de exploración}
+
+Supongamos que queremos ir de \(A\) a \(D\) y que hay dos opciones. Los valores son costes de ejemplo, no mediciones de la ruta de Lima.
+
+\[
+\begin{array}{c@{\qquad}c}
+A \stackrel{2}{\longrightarrow} B \stackrel{8}{\longrightarrow} D &
+A \stackrel{4}{\longrightarrow} C \stackrel{3}{\longrightarrow} D
+\end{array}
+\]
+
+Dijkstra explora \(B\) antes que \(C\) porque llegar desde \(A\) a \(B\) cuesta 2 y llegar a \(C\) cuesta 4. Al pasar por \(B\), descubre una ruta a \(D\) de coste 10. Luego explora \(C\) y reduce el coste del destino a 7.
+
+Con A*, supongamos que \(h(B)=7\), \(h(C)=2\) y \(h(D)=0\). Desde \(A\), la prioridad de \(B\) es 9 y la de \(C\) es 6. Se explora \(C\) primero y se alcanza \(D\) con prioridad 7, antes de explorar \(B\). Ambos métodos eligen \(A\to C\to D\). El buscador reconstruye el orden siguiendo los nodos anteriores desde \(D\) hasta \(A\) y luego invierte la lista.
+
+\clearpage
+\section{Del camino calculado a la web y al PNG}
+
+La búsqueda devuelve identificadores de nodos ordenados. Para dibujar \((A,C,D)\), la aplicación consulta en el grafo las coordenadas de esos nodos. Los identificadores indican qué puntos recorrió el algoritmo. Las coordenadas indican dónde ponerlos. Una \textbf{polilínea} une los puntos en el orden indicado, primero \(A\) con \(C\) y luego \(C\) con \(D\).
+
+\subsection{Mapa interactivo}
+
+El planificador guarda en el resultado la secuencia de coordenadas de los nodos. La aplicación web pasa esos puntos a Folium, que añade la polilínea sobre el mapa base de OpenStreetMap. El mapa base muestra calles y referencias. La ruta es una capa dibujada encima. Streamlit muestra el mapa en el navegador, donde el usuario puede acercarse o desplazarse. El buscador ya terminó cuando se dibuja la línea.
+
+\subsection{Imagen PNG}
+
+Desde la terminal, el renderizador recibe también el grafo y la secuencia de nodos. Consulta la geometría disponible entre cada par consecutivo. Una geometría puede incluir puntos intermedios para seguir una curva. Si hace falta, el renderizador usa las posiciones de los extremos. Después transforma las coordenadas a un plano, ajusta el encuadre y dibuja la red y la ruta con Matplotlib. La figura se guarda como PNG, una imagen fija formada por píxeles.
+
+En el proyecto, el mapa web une las coordenadas de los nodos de la ruta. El PNG puede recuperar el detalle de los tramos. Si hay varias aristas entre un mismo par de nodos, el PNG elige una geometría disponible para dibujarlo, por lo que ese detalle puede diferir del tramo concreto que el buscador utilizó al calcular el coste.
+
+\subsection{Relación entre los datos y la imagen}
+
+Para buscar la ruta hacen falta conexiones, sentidos y costes. Para dibujarla hacen falta posiciones, orden y, cuando hay curvas, puntos intermedios. La web y el PNG son dos maneras de presentar el resultado de esa búsqueda. La terminal también puede mostrar la distancia, la duración estimada y otras métricas en forma de texto.
+\end{document}
